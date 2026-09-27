@@ -87,6 +87,18 @@ BigTIFF, 4500 pages (one per y, −4.5 → 4.498 mm), each page 35 (z) × 6000 (
 The port writes that JSON on page 0 (all the legacy reader uses) plus a `<file>.tiff.json`
 sidecar, and optionally keeps the float32 dB volume as `<name>_dB_float32.npy` (y, z, x).
 
+Calibration (as legacy `yOCT2Tif` buildTiffFrameTags, with voxel sizes measured from the
+output axes): `XResolution` = 1/dx and `YResolution` = 1/dz (pixels/cm, `ResolutionUnit` cm),
+and an ImageJ `ImageDescription` with `unit=micron` and `spacing=dy`. Fiji therefore shows
+dx × dz × dy µm, e.g. 2 × 2 × 2 µm for 10um_FOV_1. The same description carries `oct_*`
+key=value entries, and the JSON carries `voxel_size_um` and `acquisition`:
+* patches stitched in x/y (12 × 9);
+* patch FOV (1 × 1 mm) and patch size (500 × 500 px);
+* patch step and overlap (0);
+* focus depths (8, 10 µm apart);
+* native depth pixel (1.434 µm in tissue) and refractive index;
+* consistency checks.
+
 ## 8. Reading raw data in Python
 
 ```python

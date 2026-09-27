@@ -338,6 +338,12 @@ class Reconstructor:
             "scanZDepths_mm": list(map(float, self.si.z_depths_mm)),
         }
 
+    def acquisition(self, md: dict, shape) -> dict:
+        """Patches / raw-data / calibration summary written into the TIFF and JSON outputs."""
+        from .io.metadata import acquisition_summary, voxel_size_um
+        return acquisition_summary(self.si, self.hdr, self.sg.z_um, self.resolved["n_medium"],
+                                   self.focus, shape, voxel_size_um(md))
+
     def run(self):
         cfg, log = self.cfg, self.log
         out_dir = Path(cfg.output_root) / cfg.output_name
@@ -386,7 +392,10 @@ class Reconstructor:
         recon_s = time.perf_counter() - t_start
 
         clim = (float(np.nanmin(plane_clims[:, 0])), float(np.nanmax(plane_clims[:, 1])))
+        md = self.metadata(y_sel)
+        acq = self.acquisition(md, shape)
         summary = {"device": self.device, "rows": rows, "output_dir": str(out_dir),
+                   "voxel_size_um": acq["output"]["voxel_size_um"], "acquisition": acq,
                    "output_shape_yzx": list(shape), "clim_dB": clim,
                    "reconstruction_seconds": recon_s, "timers": self.timers,
                    "resolved": self.resolved, "sources": self.sources}
@@ -394,9 +403,10 @@ class Reconstructor:
             self.progress(stage="write_tiff", done=0, total=shape[0])
             t0 = time.perf_counter()
             tif = out_dir / f"{name}.tiff"
-            tiff_writer.write_legacy_tiff(tif, vol, clim, self.metadata(y_sel),
+            tiff_writer.write_legacy_tiff(tif, vol, clim, md,
                                           cfg.legacy_double_quantization,
                                           plane_clims if cfg.legacy_double_quantization else None,
+                                          acquisition=acq,
                                           progress=lambda i: self.progress(stage="write_tiff", done=i + 1, total=shape[0])
                                           if i % 100 == 0 or i == shape[0] - 1 else None)
             summary["tiff_seconds"] = time.perf_counter() - t0

@@ -6,6 +6,7 @@
   python -m octrecon estimate-dispersion <OCTVolume> [--device ...]
   python -m octrecon detect-focus <OCTVolume> [--dispersion B] [--device ...]
   python -m octrecon extract <OCTVolume> [--delete-archives]      # legacy yOCTUnzipTiledScan
+  python -m octrecon retag <reconstruction.tiff> [--volume <OCTVolume>] [--output new.tiff]   # fix calibration/metadata
 """
 from __future__ import annotations
 
@@ -35,6 +36,8 @@ def main(argv=None):
     d = sub.add_parser("estimate-dispersion"); d.add_argument("volume"); d.add_argument("--device", default="auto")
     f = sub.add_parser("detect-focus"); f.add_argument("volume"); f.add_argument("--dispersion", type=float); f.add_argument("--device", default="auto")
     x = sub.add_parser("extract", help="extract .oct tile archives (legacy yOCTUnzipTiledScan)"); x.add_argument("volume"); x.add_argument("--delete-archives", action="store_true")
+    t = sub.add_parser("retag", help="rewrite calibration/metadata of an existing reconstruction TIFF")
+    t.add_argument("tiff"); t.add_argument("--volume"); t.add_argument("--output")
     a = ap.parse_args(argv)
 
     if a.cmd == "web":
@@ -68,6 +71,9 @@ def main(argv=None):
         from .estimation.focus import detect_focus
         r = detect_focus(a.volume, dispersion_quadratic_term=a.dispersion, device=get_xp(a.device)[1])
         print(json.dumps({k: v for k, v in r.items() if not isinstance(v, (bytes, bytearray))}, indent=2, default=str)); return
+    if a.cmd == "retag":
+        from .retag import retag
+        retag(a.tiff, a.volume, a.output); return
     if a.cmd == "extract":
         from .io.scaninfo import ScanInfo
         from .io.volume import extract_volume

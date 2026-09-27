@@ -202,12 +202,33 @@ its β).
 
 | File | Content |
 |---|---|
-| `<name>.tiff` | uint16 BigTIFF, one page per y plane (z × x), PackBits. dB = (v−1)·(c2−c1)/65534 + c1, v=0 → no data. Same layout and metadata as legacy `yOCT2Tif`, so it can be read by `yOCTFromTif`. |
+| `<name>.tiff` | uint16 BigTIFF, one page per y plane (z × x), PackBits. dB = (v−1)·(c2−c1)/65534 + c1, v=0 → no data. Same layout and metadata as legacy `yOCT2Tif`, so it can be read by `yOCTFromTif`. **Calibrated**: see below. |
 | `<name>.tiff.json` | Metadata: axes in mm and `clim` [c1, c2] in dB. |
 | `<name>_config.json` | All settings plus the resolved values and their sources, and the storage layout. |
 | `<name>_run_summary.json` | Device, timings, clim, output shape. |
 | `<name>.log` | The run log. |
 | `<name>_dB_float32.npy` | Only if `keep_float_volume`. |
+
+**TIFF calibration and metadata.** The voxel size is measured from the output axes (not
+assumed) and written the way legacy `yOCT2Tif` does, so Fiji/ImageJ shows real units:
+* **pixel width = x** (fast scan), **pixel height = z** (depth), **voxel depth = y**
+  (slow scan, the page spacing). All three are in µm.
+* The tags are `XResolution`/`YResolution` (pixels/cm) plus the ImageJ description
+  (`unit=micron`, `spacing`).
+
+The acquisition facts are added too. Fiji shows them under *Image → Show Info*
+(`oct_*` keys), and they are also in the JSON (`voxel_size_um`, `acquisition`):
+* **patches stitched in x and y** (e.g. 12 × 9), cross-checked between the ScanInfo scan
+  range ÷ patch FOV and the list of patch centres;
+* patch FOV (mm), patch size (px), patch step and overlap, and the number of focus depths;
+* the native depth pixel before resampling (e.g. 1.434 µm in tissue at n = 1.33), the
+  refractive index, and the OCT system and probe;
+* a consistency check that the voxel size equals the patch FOV ÷ patch pixels, and that
+  the output width equals the number of patches × the patch pixels.
+
+Files written before this was added can be fixed without reconstructing again:
+`python -m octrecon retag <file.tiff> [--volume <OCTVolume>]`. It rewrites only the
+metadata and verifies that the pixels are unchanged.
 
 ---
 
@@ -222,6 +243,7 @@ python -m octrecon reconstruct /data/sample/OCTVolume --set dispersion_quadratic
 python -m octrecon estimate-dispersion /data/sample/OCTVolume
 python -m octrecon detect-focus /data/sample/OCTVolume
 python -m octrecon extract /data/sample/OCTVolume [--delete-archives]
+python -m octrecon retag /data/recon/sample_recon/sample_recon.tiff --volume /data/sample/OCTVolume   # fix calibration/metadata of an existing TIFF
 ```
 `configs/example_10um_FOV_1.yaml` is an example config.
 
