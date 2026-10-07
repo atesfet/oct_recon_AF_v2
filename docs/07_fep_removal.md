@@ -61,6 +61,18 @@ Per tile and batch of B-scans (complex scans, before the magnitude):
    The coefficient is therefore shrunk to the local background energy:
    `c ← c · sqrt(keep · rank · P_bg / |c|²)` (`fep_keep_level` = keep = 0.7). With `keep = 0` the
    whole projection is removed.
+6. **Never remove more than the film can account for (coherence cap, protects the tissue).**
+   A single A-line cannot tell a film reflection from a bright, PSF-shaped tissue speckle at the
+   surface — steps 3–5 alone removed 6–11 dB of the tissue signal at the surface (also at the
+   tile corners where the film is weak). The film, however, is one continuous mirror: its complex
+   signal stays phase-consistent from A-line to A-line, while tissue speckle decorrelates beyond
+   the speckle size. The film energy is therefore estimated from the lateral coherence,
+   `q(x) = <s(x), s(x+L)>` (both segments on the rows of A-line x, lag L = `fep_coh_lag` = 4
+   A-lines = 8 µm), averaged over W = `fep_coh_window` = 31 A-lines and corrected for the
+   incoherent bias: `E_f = sqrt(max(|mean q|² − mean|q|²/W, 0))`. The subtraction is capped:
+   `g ← g · min(1, (1 + margin) · sqrt(E_f / |c|²))`, margin = `fep_coh_margin` = 1.0 (the film's ±20 % amplitude jitter and the
+   decorrelation of the lag product by field curvature). Pure film: E_f ≈ |c|², removed as before. Tissue: E_f ≈ 0,
+   left in place. Mixed: only the film's share is removed.
 
 Everything outside the ±R window (+ search range) is bit-identical to the input; inside it only
 the `rank` PSF components are changed. Heavy work runs on the selected device (CuPy / PyTorch);
@@ -112,6 +124,9 @@ larger (row 4: 106 s → 150–190 s).
 |---|---|---|
 | `fep_removal` | `True` | enable the step |
 | `fep_keep_level` | 0.7 | background energy kept along the basis (0 = remove all) |
+| `fep_coherence_limit` | `True` | cap the removal at the laterally coherent film energy (step 6; protects tissue) |
+| `fep_coh_lag`, `fep_coh_window`, `fep_coh_margin` | 4, 31, 1.0 | lag (A-lines), averaging window (A-lines), allowed excess |
+| `fep_bg_mode` | `both` | background power for step 5: `both` sides, brighter side (`max`), or `inside` the window |
 | `fep_rank` | 3 | PSF basis size |
 | `fep_half_window` | 8 | R, samples on each side of the surface |
 | `fep_search` | 4 | ± samples searched for the per-A-line peak |

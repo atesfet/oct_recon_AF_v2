@@ -101,6 +101,11 @@ class ReconConfig:
     fep_max_surfaces: int = 4
     fep_shrink: bool = True
     fep_keep_level: float = 0.7
+    fep_coherence_limit: bool = True           # cap removal at the laterally coherent (film) energy
+    fep_coh_lag: int = 4
+    fep_coh_window: int = 31
+    fep_coh_margin: float = 1.0
+    fep_bg_mode: str = "both"                  # both | max | inside
     fep_learn_basis: bool = True
     fep_basis_file: str | None = None          # .npy (2R+1, rank) complex; overrides learning
     fep_save_removed: bool = True              # also save the removed (subtracted) signal volume + projection
@@ -275,7 +280,9 @@ class Reconstructor:
         fc = FEPConfig(enabled=True, rank=cfg.fep_rank, half_window=cfg.fep_half_window, search=cfg.fep_search,
                        lateral_median=cfg.fep_lateral_median, frac_lo=cfg.fep_frac_lo, frac_hi=cfg.fep_frac_hi,
                        detect_min_db=cfg.fep_detect_min_db, max_surfaces=cfg.fep_max_surfaces,
-                       shrink=cfg.fep_shrink, keep_level=cfg.fep_keep_level, learn_basis=cfg.fep_learn_basis)
+                       shrink=cfg.fep_shrink, keep_level=cfg.fep_keep_level, learn_basis=cfg.fep_learn_basis,
+                       bg_mode=cfg.fep_bg_mode, coherence_limit=cfg.fep_coherence_limit, coh_lag=cfg.fep_coh_lag,
+                       coh_window=cfg.fep_coh_window, coh_margin=cfg.fep_coh_margin)
         shift = self._fep_shift()
         if cfg.fep_basis_file:
             U = np.load(cfg.fep_basis_file)

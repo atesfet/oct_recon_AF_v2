@@ -145,7 +145,7 @@ async function estimateDispersion() {
 
 // ------------------------------------------------------------------ config
 function device() { const r = document.querySelector("input[name=device]:checked"); return r ? r.value : "auto"; }
-const FEP_NUM = ["fep_keep_level", "fep_rank", "fep_half_window", "fep_search", "fep_lateral_median", "fep_detect_min_db", "fep_frac_lo", "fep_frac_hi", "fep_max_surfaces"];
+const FEP_NUM = ["fep_keep_level", "fep_rank", "fep_half_window", "fep_search", "fep_lateral_median", "fep_detect_min_db", "fep_frac_lo", "fep_frac_hi", "fep_max_surfaces", "fep_coh_lag", "fep_coh_window", "fep_coh_margin"];
 function buildConfig() {
   if (!$("volume").value.trim()) throw new Error("Select the raw OCT volume folder first (step 1)");
   if (!$("output_root").value.trim() || !$("output_name").value.trim()) throw new Error("Set the output folder and reconstruction name (step 2)");
@@ -166,6 +166,7 @@ function buildConfig() {
     rows: parseRows($("rows").value), write_tiff: $("write_tiff").checked, keep_float_volume: $("keep_float_volume").checked,
     legacy_double_quantization: $("legacy_double_quantization").checked,
     fep_removal: $("fep_removal").checked, fep_learn_basis: $("fep_learn_basis").checked,
+    fep_coherence_limit: $("fep_coherence_limit").checked,
     fep_save_removed: $("fep_save_removed").checked,
     xy_projection: $("xy_projection").checked, xy_projection_tissue_only: $("xy_projection_tissue_only").checked,
     tissue_smooth_um: parseNum($("tissue_smooth_um").value), tissue_max_hole_mm2: parseNum($("tissue_max_hole_mm2").value),
@@ -192,7 +193,7 @@ function applyConfig(c) {
   for (const k of ["precision", "interp_method", "raw_input"]) if (c[k]) $(k).value = c[k];
   for (const k of ["batch_frames", "io_threads", "prefetch_batches"]) if (c[k]) $(k).value = c[k];
   for (const k of ["gpu_fused_kernel", "write_tiff", "keep_float_volume", "legacy_double_quantization"]) if (c[k] !== undefined) $(k).checked = !!c[k];
-  for (const k of ["fep_removal", "fep_learn_basis", "fep_save_removed", "xy_projection", "xy_projection_tissue_only"]) if (c[k] !== undefined) $(k).checked = !!c[k];
+  for (const k of ["fep_removal", "fep_learn_basis", "fep_coherence_limit", "fep_save_removed", "xy_projection", "xy_projection_tissue_only"]) if (c[k] !== undefined) $(k).checked = !!c[k];
   for (const k of ["tissue_smooth_um", "tissue_max_hole_mm2", "tissue_min_area_mm2"]) if (c[k] !== undefined && c[k] !== null) $(k).value = c[k];
   if (c.tissue_threshold_db !== undefined) $("tissue_threshold_db").value = c.tissue_threshold_db === "auto" ? "" : c.tissue_threshold_db;
   for (const k of FEP_NUM) if (c[k] !== undefined && c[k] !== null) $(k).value = c[k];

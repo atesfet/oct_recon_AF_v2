@@ -53,6 +53,12 @@ class FEPConfig:
     bg_rows: int = 10             # background rows on each side for the shrinkage
     shrink: bool = True
     keep_level: float = 0.7       # fraction of the local background energy kept along the basis
+    bg_mode: str = "both"         # background power for the shrinkage: both | max | inside
+    coherence_limit: bool = True  # cap the removal at the laterally coherent (film) energy
+    coh_lag: int = 4              # A-line lag of the coherence product (beyond the speckle size)
+    coh_window: int = 31          # A-lines averaged for the coherent film-energy estimate
+    coh_margin: float = 1.0       # allowed excess over the estimate (film amplitude jitter)
+    use_specular_weight: bool = True  # keep the specular-likeness decision weight w
     learn_basis: bool = True      # learn the PSF basis from the scan (else theoretical)
 
 
@@ -150,6 +156,45 @@ class FEPRemover:
         self.R = cfg.half_window
         self.stats = {"batches": 0, "surfaces": 0, "removed_energy_db": []}
 
+    def _background_power(self, wxp, work, pk, bidx_off, bg, es, ec, n_win, rank):
+        """Per-sample power of the signal *under* the reflection (tissue or noise) that the
+        shrinkage keeps. both: mean over bg rows above and below the window; max: the brighter
+        side (the tissue side at a film/tissue interface); inside: energy of the window segment
+        orthogonal to the PSF basis, per dimension (the level right at the surface)."""
+        mode = self.cfg.bg_mode
+        if mode == "inside":
+            return wxp.maximum(es - ec, 0) / (n_win - rank)
+        p = wxp.abs(wxp.take_along_axis(work, wxp.asarray(pk[..., None] + bidx_off), axis=-1)) ** 2
+        if mode == "max":
+            return wxp.maximum(wxp.mean(p[..., :bg], axis=-1), wxp.mean(p[..., bg:], axis=-1))
+        return wxp.mean(p, axis=-1)
+
+    def _coherence_gain(self, wxp, work, idx, ec, B, nX, nZ):
+        """Cap the subtracted energy at the film energy, estimated from the lateral coherence:
+        E_f(x) = | mean_{x' in window} <s(x'), s(x'+L)> |, where both segments are taken on the
+        rows of A-line x'. The film is a continuous mirror, so its products add up coherently;
+        tissue speckle decorrelates beyond the speckle size (lag L) and averages out.
+        Returns g_coh = min(1, (1 + margin) * sqrt(E_f / ||c||^2))."""
+        cfg = self.cfg
+        L = int(cfg.coh_lag)
+        xl = np.arange(nX) + L
+        xl = np.where(xl < nX, xl, np.arange(nX) - L)                    # mirror at the right edge
+        flat = ((np.arange(B)[:, None, None] * nX + xl[None, :, None]) * nZ + idx)
+        work_flat = work.reshape(-1)
+        seg = wxp.take_along_axis(work, wxp.asarray(idx), axis=-1)
+        seg_l = work_flat[wxp.asarray(flat.reshape(-1))].reshape(seg.shape)
+        prod = _np(wxp, wxp.sum(seg * wxp.conj(seg_l), axis=-1))          # (B, nX) complex, host
+        from scipy.ndimage import uniform_filter1d
+        m = (uniform_filter1d(prod.real, cfg.coh_window, axis=-1, mode="nearest")
+             + 1j * uniform_filter1d(prod.imag, cfg.coh_window, axis=-1, mode="nearest"))
+        # remove the bias of incoherent (tissue) products: E|mean|^2 = mean|q|^2 / n for random phases
+        v = uniform_filter1d(np.abs(prod) ** 2, cfg.coh_window, axis=-1, mode="nearest") / cfg.coh_window
+        ef = np.sqrt(np.maximum(np.abs(m) ** 2 - v, 0.0))
+        ec_h = np.maximum(_np(wxp, ec), 1e-30)
+        g = np.minimum(1.0, (1.0 + cfg.coh_margin) * np.sqrt(ef / ec_h)).astype(np.float32)
+        self.stats.setdefault("coh_gain_median", []).append(float(np.median(g)))
+        return wxp.asarray(g)
+
     def process(self, cpx, frames, row_lo: int, row_hi: int):
         """cpx: (B, nX, nZ) complex scans on the backend (numpy / cupy) or a torch tensor.
         frames: tile-local frame indices of the batch (host ints). row_lo/row_hi: flattened rows
@@ -197,9 +242,13 @@ class FEPRemover:
             frac = _np(wxp, ec / es)
             fmed = median_filter(frac, size=(1, cfg.lateral_median), mode="nearest")
             w = np.clip((fmed - cfg.frac_lo) / (cfg.frac_hi - cfg.frac_lo), 0, 1).astype(np.float32)
+            if not cfg.use_specular_weight:
+                w = np.ones_like(w)
             gain = wxp.asarray(w)
+            if cfg.coherence_limit:
+                gain = gain * self._coherence_gain(wxp, work, idx, ec, B, nX, nZ)
             if cfg.shrink:
-                bpow = wxp.mean(wxp.abs(wxp.take_along_axis(work, wxp.asarray(pk[..., None] + bidx_off), axis=-1)) ** 2, axis=-1)
+                bpow = self._background_power(wxp, work, pk, bidx_off, bg, es, ec, 2 * R + 1, U.shape[1])
                 keep = cfg.keep_level * U.shape[1] * bpow                # expected background energy in the subspace
                 gain = gain * wxp.maximum(0.0, 1.0 - wxp.sqrt(keep / wxp.maximum(ec, 1e-30))).astype(np.float32)
             delta = gain[..., None] * (c @ U.T)                      # (B, nX, 2R+1)

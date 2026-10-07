@@ -19,18 +19,20 @@ def _window():
 
 
 def _reflection(rng, amp_db, ref=1.0):
-    """(B, NX, NZ) complex: one specular surface (peak amp_db above `ref`), smooth sub-pixel tilt, random phase per A-line,
-    +-20% amplitude jitter (as measured on the real FEP film)."""
+    """(B, NX, NZ) complex: one specular surface (peak amp_db above `ref`), smooth sub-pixel tilt, a
+    laterally coherent phase (the film is one continuous mirror: smooth phase along x, random per
+    B-scan) and +-20% amplitude jitter per A-line, as measured on the real FEP film."""
     aw = _window()
     n = np.arange(N)
     out = np.zeros((B, NX, NZ), np.complex64)
     for b in range(B):
+        phi0 = 2 * np.pi * rng.uniform()
         for x in range(NX):
             m = ROW + 0.8 * np.sin(2 * np.pi * x / NX)
             a = np.fft.ifft(np.exp(-2j * np.pi * n * m / N) * aw)[:NZ]
             a /= np.abs(a).max()
             amp = ref * 10 ** (amp_db / 20) * (1 + 0.2 * rng.uniform(-1, 1))
-            out[b, x] = amp * np.exp(2j * np.pi * rng.uniform()) * a
+            out[b, x] = amp * np.exp(1j * (phi0 + 0.01 * x)) * a
     return out
 
 
@@ -143,3 +145,30 @@ def test_pipeline_with_fep_runs_and_backends_agree(synth_volume, device):
     assert r.fep is not None and np.isfinite(p).any()
     ok = np.isfinite(ref) & np.isfinite(p)
     assert np.nanmax(np.abs(p[ok] - ref[ok])) < 0.05      # dB
+
+
+def test_incoherent_bright_peaks_are_not_removed():
+    """Bright PSF-shaped peaks with a random phase per A-line (speckle-like, e.g. a bright tissue
+    layer) are not a film: the coherence cap must leave them (and the tissue) in place."""
+    rng = np.random.default_rng(5)
+    tissue = _speckle(rng, slice(ROW - 3, 700)) + _speckle(rng, slice(0, NZ), 0.03)
+    peaks = _reflection(rng, 10)
+    peaks *= np.exp(2j * np.pi * rng.uniform(size=(B, NX, 1)))          # destroy lateral coherence
+    obs = tissue + peaks
+    out = _remover().process(obs.copy(), list(range(B)), 300, 700)
+    band = slice(ROW - R, ROW + R + 1)
+    changed = _p(out - obs, band) - _p(obs, band)
+    assert changed < -10, f"incoherent peaks were removed ({changed:+.1f} dB of the signal changed)"
+
+
+def test_weak_coherent_film_on_tissue_keeps_tissue():
+    rng = np.random.default_rng(6)
+    noise = _speckle(rng, slice(0, NZ), 0.03)
+    tissue = _speckle(rng, slice(ROW - 3, 700)) + noise
+    refl = _reflection(rng, -6)                                         # film weaker than tissue (tile corner)
+    out = _remover().process(tissue + refl, list(range(B)), 300, 700)
+    band = slice(ROW - R, ROW + R + 1)
+    err = _p(out - tissue, band) - _p(tissue, band)
+    before = _p(refl, band) - _p(tissue, band)
+    assert err < before, f"error {err:+.1f} dB not below the film itself ({before:+.1f} dB)"
+    assert err < -10
