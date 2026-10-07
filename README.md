@@ -5,6 +5,9 @@
 > before the magnitude is taken, so the reconstruction only contains tissue signal. It is on by
 > default; `--no-fep` / `fep_removal=false` / unticking the box in the web app gives the v1
 > (legacy-identical) output. Details and results: [`docs/07_fep_removal.md`](docs/07_fep_removal.md).
+> The removed signal is saved too (volume, xy projection, overview figure) so it can be inspected.
+> v2 also saves a **tissue-only xy (en-face) projection** — one 2D image of the tissue
+> ([`docs/08_xy_projection.md`](docs/08_xy_projection.md)). `--v1` switches both off.
 > Speed figures below are for v1 / FEP removal off (FEP removal adds ≈ 40 % on the GPU).
 
 GPU/CPU reconstruction of **tiled Thorlabs OCT volumes** with a local **web app**.
@@ -221,6 +224,10 @@ records the resolved value **and its source** in `<name>_config.json`.
 | `raw_input` | `auto` | `auto` = read `.oct` in place; `extract` = extract first. |
 | `delete_archives_after_extract` | `false` | The legacy default is `true`. |
 | `fep_removal` | `true` | **v2.** Remove the FEP-film specular reflections (`docs/07_fep_removal.md`). `false` = legacy-identical output. |
+| `fep_save_removed` | `true` | **v2.** Also save the removed FEP signal (volume, projection, overview figure). |
+| `xy_projection` | `true` | **v2.** Save the xy (en-face) projection. `false` together with `fep_removal=false` = v1 output. |
+| `xy_projection_tissue_only` | `true` | **v2.** Project only over the automatically segmented tissue slab (`false`: all z). |
+| `tissue_smooth_um`, `tissue_threshold_db`, `tissue_max_hole_mm2`, `tissue_min_area_mm2` | 30, `auto` (Otsu), 0.05, 0.005 | **v2.** Tissue mask (`docs/08_xy_projection.md`). |
 | `fep_keep_level`, `fep_rank`, `fep_half_window`, `fep_search`, `fep_lateral_median`, `fep_frac_lo`, `fep_frac_hi`, `fep_detect_min_db`, `fep_max_surfaces`, `fep_shrink`, `fep_learn_basis`, `fep_basis_file` | see doc 07 | FEP-removal tuning (web app: *FEP removal options*). |
 
 **Validated preset:** GAN632 + Olympus 20x OCTG (WINTER): β = **8.949e7**, σ = 10. This
@@ -256,6 +263,11 @@ its β).
 | `<name>_run_summary.json` | Device, timings, clim, output shape. |
 | `<name>.log` | The run log. |
 | `<name>_dB_float32.npy` | Only if `keep_float_volume`. |
+| `<name>_xy_mean.tif` / `_xy_max.tif` (+ `.png`) | **v2.** Tissue-only xy (en-face) projection: mean amplitude / maximum over the tissue slab of each column, float32 dB, NaN = no tissue; calibrated in µm (ImageJ). `docs/08_xy_projection.md`. |
+| `<name>_tissue_thickness_um.tif` (+ `.png`) | **v2.** Thickness of the tissue slab used for the projection. |
+| `<name>_fep_removed.tiff` (+ `.json`) | **v2.** The removed (subtracted) FEP signal as a volume, same grid / format as `<name>.tiff`. |
+| `<name>_fep_removed_xy.tif` (+ `.png`) | **v2.** Its xy projection (mean over all z). |
+| `<name>_fep_overview.png` | **v2.** Tissue projection, removed-signal projection and a B-scan of both at a glance. |
 
 **TIFF calibration and metadata.** The voxel size is measured from the output axes (not
 assumed) and written the way legacy `yOCT2Tif` does, so Fiji/ImageJ shows real units:
@@ -287,7 +299,9 @@ python -m octrecon web                                   # the web app (same as 
 python -m octrecon inspect  /data/sample/OCTVolume       # summary + automatic parameters (JSON)
 python -m octrecon reconstruct /data/sample/OCTVolume --output-root /data/recon --output-name sample_recon --device gpu
 python -m octrecon reconstruct /data/sample/OCTVolume --config my_config.json --rows 4
-python -m octrecon reconstruct /data/sample/OCTVolume --no-fep                # v1 / legacy-identical (no FEP removal)
+python -m octrecon reconstruct /data/sample/OCTVolume --no-fep                # no FEP removal
+python -m octrecon reconstruct /data/sample/OCTVolume --no-projection         # no xy projection
+python -m octrecon reconstruct /data/sample/OCTVolume --v1                    # v1 / legacy-identical (= --no-fep --no-projection)
 python -m octrecon reconstruct /data/sample/OCTVolume --set fep_keep_level=0.5
 python -m octrecon reconstruct /data/sample/OCTVolume --set dispersion_quadratic_term=8.9e7 focus_positions=433
 python -m octrecon estimate-dispersion /data/sample/OCTVolume
@@ -334,6 +348,7 @@ Details, benchmarks and validation are in `docs/oct_recon_AF_v1.pdf` and `docs/0
 | `docs/05_parameter_estimation.md` | Automatic dispersion / focus / drift estimation (Python ports). |
 | `docs/06_input_formats.md` | Supported raw formats and their validation against MATLAB. |
 | `docs/07_fep_removal.md` | **v2:** FEP-film reflection removal — method, parameters, results, limitations. |
+| `docs/08_xy_projection.md` | **v2:** tissue-only xy projection — tissue mask, slab, projection definitions. |
 | `docs/oct_recon_AF_v1.pdf` | Technical report: acceleration analysis, benchmarks, validation. |
 
 ---
@@ -347,7 +362,8 @@ octrecon/                 Python package
   presets.py              system/probe constants (dispersion, focus sigma)
   io/                     ScanInfo, Thorlabs headers/chirp, tile readers (.oct / unzipped / ...), TIFF writer
   core/                   geometry, spectral processing (CPU/CUDA kernels), stitching,
-                          torch_backend.py (Apple GPU / MPS), fep.py (FEP-film reflection removal, v2)
+                          torch_backend.py (Apple GPU / MPS), fep.py (FEP-film reflection removal, v2),
+                          projection.py (tissue mask + xy projection, v2)
   estimation/             automatic dispersion / focus detection, drift fit, B-scan previews
   webapp/                 local web server + static UI (no internet needed)
   cli.py                  command line (python -m octrecon ...)

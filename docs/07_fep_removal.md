@@ -118,6 +118,7 @@ learning the basis.
 | `fep_shrink` | `True` | background-level shrinkage (False = subtract the full projection) |
 | `fep_learn_basis` | `True` | learn the basis from the scan (False = theoretical PSF) |
 | `fep_basis_file` | `None` | `.npy` (2R+1, rank) complex basis; overrides learning |
+| `fep_save_removed` | `True` | also save the removed signal: volume `<name>_fep_removed.tiff`, its xy projection and `<name>_fep_overview.png` (see doc 08) |
 
 The run summary (`<output_name>_run_summary.json`) records the learnt basis (captured energy,
 number of segments) and the removal statistics under `fep_removal`.
