@@ -39,6 +39,10 @@ def main(argv=None):
     d = sub.add_parser("estimate-dispersion"); d.add_argument("volume"); d.add_argument("--device", default="auto")
     f = sub.add_parser("detect-focus"); f.add_argument("volume"); f.add_argument("--dispersion", type=float); f.add_argument("--device", default="auto")
     x = sub.add_parser("extract", help="extract .oct tile archives (legacy yOCTUnzipTiledScan)"); x.add_argument("volume"); x.add_argument("--delete-archives", action="store_true")
+    pj = sub.add_parser("project", help="recompute the tissue-only xy projection from a kept float volume")
+    pj.add_argument("output_dir"); pj.add_argument("--name"); pj.add_argument("--all-z", action="store_true")
+    pj.add_argument("--smooth-um", type=float, default=30.0); pj.add_argument("--threshold-db", default="auto")
+    pj.add_argument("--max-hole-mm2", type=float, default=0.5); pj.add_argument("--min-area-mm2", type=float, default=0.005)
     t = sub.add_parser("retag", help="rewrite calibration/metadata of an existing reconstruction TIFF")
     t.add_argument("tiff"); t.add_argument("--volume"); t.add_argument("--output")
     a = ap.parse_args(argv)
@@ -78,6 +82,11 @@ def main(argv=None):
         from .estimation.focus import detect_focus
         r = detect_focus(a.volume, dispersion_quadratic_term=a.dispersion, device=get_xp(a.device)[1])
         print(json.dumps({k: v for k, v in r.items() if not isinstance(v, (bytes, bytearray))}, indent=2, default=str)); return
+    if a.cmd == "project":
+        from .outputs_v2 import reproject
+        thr = a.threshold_db if a.threshold_db == "auto" else float(a.threshold_db)
+        r = reproject(a.output_dir, a.name, not a.all_z, a.smooth_um, thr, a.max_hole_mm2, a.min_area_mm2)
+        print(json.dumps(r, indent=2, default=str)); return
     if a.cmd == "retag":
         from .retag import retag
         retag(a.tiff, a.volume, a.output); return

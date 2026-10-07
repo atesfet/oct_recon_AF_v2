@@ -109,7 +109,7 @@ class ReconConfig:
     xy_projection_tissue_only: bool = True     # False: project over all z
     tissue_smooth_um: float = 30.0             # lateral smoothing for the tissue mask
     tissue_threshold_db: object = "auto"       # auto (Otsu) | number (dB)
-    tissue_max_hole_mm2: float = 0.05          # enclosed non-tissue holes smaller than this are filled
+    tissue_max_hole_mm2: float = 0.5           # enclosed non-tissue holes smaller than this are filled
     tissue_min_area_mm2: float = 0.005         # tissue specks smaller than this are dropped
 
     @classmethod

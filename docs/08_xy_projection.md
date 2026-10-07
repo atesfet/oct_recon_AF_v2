@@ -22,6 +22,10 @@ output is identical to v1.
 The TIFFs are calibrated (ImageJ: µm per pixel = output x/y pixel size); the description holds
 the mask threshold and settings. The run summary has them under `xy_projection`.
 
+Re-run only the projection (e.g. with other mask settings) from a reconstruction that kept its
+float volume (`keep_float_volume=true`), without reconstructing again:
+`python -m octrecon project <output_dir> [--threshold-db -12 --max-hole-mm2 0.5 --smooth-um 30 --all-z]`.
+
 ## Tissue mask
 
 The volume `I(y, z, x)` (dB, as in the TIFF) is processed in y-chunks straight from the
@@ -36,7 +40,7 @@ memory-mapped result, so it works for volumes larger than RAM (full 4500 × 35 �
    the two classes), or `tissue_threshold_db` if given. Voxel mask `M = S > threshold`.
 3. **Footprint.** A column is tissue if it has ≥ 2 masked voxels. Connected specks smaller than
    `tissue_min_area_mm2` (0.005 mm²) are dropped; enclosed holes smaller than
-   `tissue_max_hole_mm2` (0.05 mm²) — dark lumens, ducts, the darker tile seams — are filled
+   `tissue_max_hole_mm2` (0.5 mm²) — dark lumens, ducts, the darker (vignetted) tile corners — are filled
    (they are inside the tissue section); larger holes and regions open to the edge of the field
    stay outside.
 4. **Slab.** Per column the top / bottom tissue surfaces are the first / last masked voxel; they

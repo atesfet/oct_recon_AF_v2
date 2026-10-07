@@ -227,7 +227,7 @@ records the resolved value **and its source** in `<name>_config.json`.
 | `fep_save_removed` | `true` | **v2.** Also save the removed FEP signal (volume, projection, overview figure). |
 | `xy_projection` | `true` | **v2.** Save the xy (en-face) projection. `false` together with `fep_removal=false` = v1 output. |
 | `xy_projection_tissue_only` | `true` | **v2.** Project only over the automatically segmented tissue slab (`false`: all z). |
-| `tissue_smooth_um`, `tissue_threshold_db`, `tissue_max_hole_mm2`, `tissue_min_area_mm2` | 30, `auto` (Otsu), 0.05, 0.005 | **v2.** Tissue mask (`docs/08_xy_projection.md`). |
+| `tissue_smooth_um`, `tissue_threshold_db`, `tissue_max_hole_mm2`, `tissue_min_area_mm2` | 30, `auto` (Otsu), 0.5, 0.005 | **v2.** Tissue mask (`docs/08_xy_projection.md`). |
 | `fep_keep_level`, `fep_rank`, `fep_half_window`, `fep_search`, `fep_lateral_median`, `fep_frac_lo`, `fep_frac_hi`, `fep_detect_min_db`, `fep_max_surfaces`, `fep_shrink`, `fep_learn_basis`, `fep_basis_file` | see doc 07 | FEP-removal tuning (web app: *FEP removal options*). |
 
 **Validated preset:** GAN632 + Olympus 20x OCTG (WINTER): β = **8.949e7**, σ = 10. This
@@ -302,6 +302,7 @@ python -m octrecon reconstruct /data/sample/OCTVolume --config my_config.json --
 python -m octrecon reconstruct /data/sample/OCTVolume --no-fep                # no FEP removal
 python -m octrecon reconstruct /data/sample/OCTVolume --no-projection         # no xy projection
 python -m octrecon reconstruct /data/sample/OCTVolume --v1                    # v1 / legacy-identical (= --no-fep --no-projection)
+python -m octrecon project /data/recon/sample_recon --max-hole-mm2 0.5        # redo the tissue-only xy projection (needs keep_float_volume)
 python -m octrecon reconstruct /data/sample/OCTVolume --set fep_keep_level=0.5
 python -m octrecon reconstruct /data/sample/OCTVolume --set dispersion_quadratic_term=8.9e7 focus_positions=433
 python -m octrecon estimate-dispersion /data/sample/OCTVolume

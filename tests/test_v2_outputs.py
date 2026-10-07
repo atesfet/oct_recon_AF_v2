@@ -69,3 +69,18 @@ def test_tissue_projection_synthetic():
     assert np.isnan(P["mean"][~fp]).all()
     inner = disk & fp
     assert np.nanmedian(P["mean"][inner]) > -10       # projection averages tissue only, not the noise
+
+
+def test_reproject_from_kept_volume(runs, tmp_path):
+    """`python -m octrecon project`: same projection as the run, from the kept float volume."""
+    from octrecon.outputs_v2 import reproject
+    w, _, _ = runs
+    vol = TF._make_tiled(tmp_path, "base")
+    s = _run(tmp_path, vol, "k", keep_float_volume=True)
+    d = Path(s["output_dir"])
+    before = tifffile.imread(d / "k_xy_mean.tif")
+    r = reproject(d, log=lambda m: None)
+    after = tifffile.imread(d / "k_xy_mean.tif")
+    np.testing.assert_array_equal(np.isnan(before), np.isnan(after))
+    np.testing.assert_allclose(before[np.isfinite(before)], after[np.isfinite(after)])
+    assert "xy_projection" in r and (d / "k_fep_overview.png").exists()

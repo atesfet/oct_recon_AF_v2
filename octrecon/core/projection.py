@@ -10,7 +10,7 @@ memory-mapped volume larger than RAM):
 2. threshold: Otsu's threshold of the smoothed dB values (global histogram), or a fixed value;
    voxel mask M = smoothed > threshold;
 3. per column (y, x): tissue footprint = at least `min_voxels` masked voxels; small enclosed
-   holes (dark lumens, tile seams; < `max_hole_mm2`) are filled, specks (< `min_area_mm2`)
+   holes (dark lumens, vignetted tile corners; < `max_hole_mm2`) are filled, specks (< `min_area_mm2`)
    removed; the top / bottom tissue surfaces (first / last masked voxel) are smoothed laterally
    and interpolated into the filled holes -> a tissue slab [top, bottom] per column;
 4. projections over the slab (only finite voxels):
@@ -70,7 +70,7 @@ def _components_area(mask):
 
 
 def tissue_projection(vol, px_um: float, dz_um: float, smooth_um: float = 30.0, threshold_db="auto",
-                      min_voxels: int = 2, max_hole_mm2: float = 0.05, min_area_mm2: float = 0.005,
+                      min_voxels: int = 2, max_hole_mm2: float = 0.5, min_area_mm2: float = 0.005,
                       surface_smooth_um: float = 50.0, chunk: int = 256, log=print, progress=None) -> dict:
     """vol: (y, z, x) float32 dB (NaN = no data), ndarray or memmap. px_um: lateral pixel (um).
     Returns dict of 2D float32 arrays (y, x): mean, max (dB, NaN outside tissue), thickness_um,
