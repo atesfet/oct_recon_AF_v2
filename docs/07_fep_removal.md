@@ -88,8 +88,12 @@ Real data (`10um_FOV_1`, y-tile row 4, stitched output, dB):
 | z = 14.5 µm | −14.7 → −15.9 | 6.0 → 3.3 |
 | z = 30.5 µm (deep tissue) | −18.2 → −18.2 | −9.4 → −9.8 |
 
-Cost: ≈ +40 % reconstruction time on the GPU (row 4: 106 s → 150–190 s), plus ≈ 30 s once for
-learning the basis.
+Cost, full volume (4500 × 35 × 6000, RTX 3080 Ti Laptop, raw data on a USB SSD, 2026-10-07):
+reconstruction 1177 s with FEP removal off vs 1195 s on (+1.6 %) — the run is limited by reading
+the raw data (I/O wait 350 s → 121 s: the extra GPU work fills the time spent waiting for the
+disk). Plus ≈ 30 s once for learning the basis and ≈ 2 min for the v2 outputs (tissue mask +
+projection, removed-signal volume). On a single, partly cached tile row the GPU-bound overhead is
+larger (row 4: 106 s → 150–190 s).
 
 ## Limitations
 

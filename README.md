@@ -8,7 +8,8 @@
 > The removed signal is saved too (volume, xy projection, overview figure) so it can be inspected.
 > v2 also saves a **tissue-only xy (en-face) projection** — one 2D image of the tissue
 > ([`docs/08_xy_projection.md`](docs/08_xy_projection.md)). `--v1` switches both off.
-> Speed figures below are for v1 / FEP removal off (FEP removal adds ≈ 40 % on the GPU).
+> Speed figures below are for v1. Full volume on the GPU, same day and disk: v1 19.6 min vs v2
+> 19.9 min reconstruction (+1.6 %, I/O-bound) + ≈ 2 min for the v2 outputs.
 
 GPU/CPU reconstruction of **tiled Thorlabs OCT volumes** with a local **web app**.
 It runs on NVIDIA GPUs (CUDA, Linux/Windows), on **Apple-silicon GPUs (Metal/MPS, macOS)** and on any CPU.
