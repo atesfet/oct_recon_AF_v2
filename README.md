@@ -9,7 +9,8 @@
 > v2 also saves a **tissue-only xy (en-face) projection** — one 2D image of the tissue
 > ([`docs/08_xy_projection.md`](docs/08_xy_projection.md)). `--v1` switches both off.
 > Speed figures below are for v1. Full volume on the GPU, same day and disk: v1 19.6 min vs v2
-> 19.9 min reconstruction (+1.6 %, I/O-bound) + ≈ 2 min for the v2 outputs.
+> 21.0 min reconstruction (+7.3 %, largely hidden behind the disk I/O) + ≈ 2 min for the v2 outputs.
+> The removal protects the tissue with a lateral-coherence cap (only the film's coherent share is removed).
 
 GPU/CPU reconstruction of **tiled Thorlabs OCT volumes** with a local **web app**.
 It runs on NVIDIA GPUs (CUDA, Linux/Windows), on **Apple-silicon GPUs (Metal/MPS, macOS)** and on any CPU.

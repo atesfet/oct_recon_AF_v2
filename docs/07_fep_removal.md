@@ -16,7 +16,7 @@ the v1 / legacy-identical output.
 ![B-scan before/after](figures/fep_bscan.png)
 
 *Data set `10um_FOV_1`, y-tile row 4 (500 output planes), left: original, right/bottom: FEP
-removed. Display range is the same for both.*
+removed (final method). Display range is the same for both.*
 
 ## Why it is possible
 
@@ -80,41 +80,63 @@ only small (B, nX) arrays go to the host.
 
 ## Results
 
-Synthetic ground truth (`tests/test_fep.py`; reflection = exact PSF with sub-pixel tilt, random
-phase, ±20 % amplitude jitter, on speckle tissue):
+All numbers are for the final method (coherence cap on, defaults above); "uncapped" is the same
+method without step 6 (the first v2 version).
+
+**Synthetic ground truth** (`tests/test_fep.py`; reflection = exact PSF with sub-pixel tilt, laterally
+coherent phase, ±20 % amplitude jitter, on speckle tissue):
 
 | case | before | after |
 |---|---|---|
 | reflection +10/+20/+30 dB on tissue | residual error ≥ amp − 12 dB rel. tissue | < −6 dB rel. tissue |
 | reflection on empty background | — | within ±3 dB of the background (no trench) |
 | tissue without reflection | — | change < −20 dB rel. tissue |
+| bright incoherent (speckle-like) peaks | — | left in place (change < −10 dB) |
 
-Real data (`10um_FOV_1`, y-tile row 4, stitched output, dB):
+**Tissue preservation — ground truth from real data.** Real tissue from just below the removal
+window (no film signal) placed under a real film reflection from a tile without tissue, at the film
+strength of the data (0 dB) and 10 dB weaker / stronger. Error of the output vs the true tissue in
+the 9 rows under the film peak (dB rel. tissue; lower is better) and correlation of the magnitudes:
 
-| output depth | median before → after | 99th pct before → after |
+| film | no removal | uncapped | final |
+|---|---|---|---|
+| none (tissue only) | 0 / 1.00 | −6.1 dB / 0.84 | **−15.1 dB / 0.98** |
+| −10 dB (weak, like tile corners) | −5.4 dB / 0.90 | −4.0 dB / 0.74 | **−7.7 dB / 0.91** |
+| 0 dB (as in the data) | +4.6 dB / 0.55 | −2.0 dB / 0.57 | **−2.8 dB / 0.70** |
+| +10 dB | +14.6 dB / 0.32 | +3.8 dB / 0.27 | +3.9 dB / 0.28 |
+
+**Real data, y-tile row 4** (stitched output). Film where it is the only signal (tiles without
+tissue), peak above the background: 14.3 / 16.7 dB → **1.9 / 2.0 dB** (uncapped: 1.9 / 2.0 dB).
+Change of the tissue signal at the surface (z = −1.5 µm) relative to v1: tile corners (weak film)
+−7.7 dB uncapped → **−1.9 dB**; tile centres (strong film glow) −11.3 dB → **−5.0 dB**.
+En-face statistics (dB, v1 → final):
+
+| output depth | median | 99th percentile |
 |---|---|---|
-| z = −5.5 µm (film above tissue) | −10.7 → −14.2 | 7.9 → −3.0 |
-| z = 0.5 µm (tissue surface) | −5.1 → −12.9 | 10.2 → 0.4 |
-| z = 4.5 µm | −5.1 → −12.3 | 10.7 → 2.7 |
-| z = 8.5 µm | −7.4 → −13.0 | 9.5 → 3.7 |
-| z = 14.5 µm | −14.7 → −15.9 | 6.0 → 3.3 |
-| z = 30.5 µm (deep tissue) | −18.2 → −18.2 | −9.4 → −9.8 |
+| z = −5.5 µm (film above tissue) | −10.7 → −12.8 | 7.9 → 5.7 |
+| z = 0.5 µm (tissue surface) | −5.1 → −8.6 | 10.2 → 7.8 |
+| z = 4.5 µm | −5.1 → −7.9 | 10.7 → 8.4 |
+| z = 8.5 µm | −7.4 → −10.3 | 9.5 → 7.5 |
+| z = 14.5 µm | −14.7 → −15.6 | 6.0 → 5.0 |
+| z = 30.5 µm (deep tissue) | −18.2 → −18.2 | −9.4 → −9.5 |
 
-Cost, full volume (4500 × 35 × 6000, RTX 3080 Ti Laptop, raw data on a USB SSD, 2026-10-07):
-reconstruction 1177 s with FEP removal off vs 1195 s on (+1.6 %) — the run is limited by reading
-the raw data (I/O wait 350 s → 121 s: the extra GPU work fills the time spent waiting for the
-disk). Plus ≈ 30 s once for learning the basis and ≈ 2 min for the v2 outputs (tissue mask +
-projection, removed-signal volume). On a single, partly cached tile row the GPU-bound overhead is
-larger (row 4: 106 s → 150–190 s).
+**Cost, full volume** (4500 × 35 × 6000, RTX 3080 Ti Laptop, raw data on a USB SSD, 2026-10-08):
+reconstruction 1177 s with FEP removal off vs 1262 s on (+7.3 %); the run is limited by reading the
+raw data (I/O wait 350 s → 165 s), so most of the extra GPU work fills time spent waiting for the
+disk. Plus ≈ 12 s at start-up (incl. learning the basis) and ≈ 2.2 min for the v2 outputs (tissue
+mask + projections, removed-signal volume).
 
 ## Limitations
 
-* Tissue signal that is itself *specular-like* at the film interface (a flat, sharp tissue
-  boundary exactly on the film) is attenuated together with the film, because it is
-  indistinguishable from the film in a single A-line.
+* Tissue that is itself specular *and laterally coherent* at the film interface (a flat, smooth
+  tissue boundary pressed against the film, which reflects because of the refractive-index step) is
+  indistinguishable from the film and is attenuated with it; part of the remaining reduction at the
+  tile centres is of this kind.
 * Inside the film window, the reconstructed tissue keeps its intensity level, but the
   `rank` PSF components are partly replaced by the background-level remainder of the film
   coefficient: the fine axial speckle pattern within ±1–2 px of the surface is not original.
+* For very strong film (+10 dB above the data), the part of the reflection outside the rank-3
+  subspace (its wings) remains a few dB above the tissue.
 * Tile seams / tile-periodic illumination (vignetting) are a different effect and are not
   addressed by this step.
 
