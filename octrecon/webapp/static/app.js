@@ -145,6 +145,7 @@ async function estimateDispersion() {
 
 // ------------------------------------------------------------------ config
 function device() { const r = document.querySelector("input[name=device]:checked"); return r ? r.value : "auto"; }
+const FEP_NUM = ["fep_keep_level", "fep_rank", "fep_half_window", "fep_search", "fep_lateral_median", "fep_detect_min_db", "fep_frac_lo", "fep_frac_hi", "fep_max_surfaces"];
 function buildConfig() {
   if (!$("volume").value.trim()) throw new Error("Select the raw OCT volume folder first (step 1)");
   if (!$("output_root").value.trim() || !$("output_name").value.trim()) throw new Error("Set the output folder and reconstruction name (step 2)");
@@ -164,7 +165,9 @@ function buildConfig() {
     batch_frames: +$("batch_frames").value, io_threads: +$("io_threads").value, prefetch_batches: +$("prefetch_batches").value,
     rows: parseRows($("rows").value), write_tiff: $("write_tiff").checked, keep_float_volume: $("keep_float_volume").checked,
     legacy_double_quantization: $("legacy_double_quantization").checked,
+    fep_removal: $("fep_removal").checked, fep_learn_basis: $("fep_learn_basis").checked,
   };
+  for (const k of FEP_NUM) cfg[k] = parseNum($(k).value);
   const m = $("focus_mode").value;
   if (m === "file") cfg.focus_positions = $("focus_file").value.trim();
   else if (m === "value") { const f = currentFocus(); if (!f) throw new Error("Enter focus value(s)"); cfg.focus_positions = f; }
@@ -184,6 +187,8 @@ function applyConfig(c) {
   for (const k of ["precision", "interp_method", "raw_input"]) if (c[k]) $(k).value = c[k];
   for (const k of ["batch_frames", "io_threads", "prefetch_batches"]) if (c[k]) $(k).value = c[k];
   for (const k of ["gpu_fused_kernel", "write_tiff", "keep_float_volume", "legacy_double_quantization"]) if (c[k] !== undefined) $(k).checked = !!c[k];
+  for (const k of ["fep_removal", "fep_learn_basis"]) if (c[k] !== undefined) $(k).checked = !!c[k];
+  for (const k of FEP_NUM) if (c[k] !== undefined && c[k] !== null) $(k).value = c[k];
   if (c.apply_path_length_correction !== undefined) $("opc").checked = !!c.apply_path_length_correction;
   if (c.rows) $("rows").value = c.rows.join(",");
   if (c.device) { const r = document.querySelector(`input[value=${c.device}]`); if (r && !r.disabled) r.checked = true; }

@@ -121,3 +121,6 @@ label.inline { flex-direction: row; align-items: center; gap: 6px; font-weight: 
 .f-nav, .f-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
 .f-nav .nav-lab { flex: 0 0 110px; }
 .drift-fig { max-width: 520px; border-radius: 8px; border: 1px solid var(--border); background: #fff; }
+
+.fep-box { margin-top: 14px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; }
+.fep-box .hint { margin: 4px 0 6px; }

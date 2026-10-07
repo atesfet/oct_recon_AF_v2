@@ -1,4 +1,11 @@
-# OCT Reconstruction (oct_recon_AF_v1)
+# OCT Reconstruction (oct_recon_AF_v2)
+
+> **v2:** adds **FEP-film reflection removal** — the specular reflections of the FEP film the
+> tissue is sandwiched in (top, and bottom when in range) are subtracted from every A-line
+> before the magnitude is taken, so the reconstruction only contains tissue signal. It is on by
+> default; `--no-fep` / `fep_removal=false` / unticking the box in the web app gives the v1
+> (legacy-identical) output. Details and results: [`docs/07_fep_removal.md`](docs/07_fep_removal.md).
+> Speed figures below are for v1 / FEP removal off (FEP removal adds ≈ 40 % on the GPU).
 
 GPU/CPU reconstruction of **tiled Thorlabs OCT volumes** with a local **web app**.
 It runs on NVIDIA GPUs (CUDA, Linux/Windows), on **Apple-silicon GPUs (Metal/MPS, macOS)** and on any CPU.
@@ -213,6 +220,8 @@ records the resolved value **and its source** in `<name>_config.json`.
 | `apply_path_length_correction` | `true` | Optical-path (field-curvature) correction from the probe polynomial. |
 | `raw_input` | `auto` | `auto` = read `.oct` in place; `extract` = extract first. |
 | `delete_archives_after_extract` | `false` | The legacy default is `true`. |
+| `fep_removal` | `true` | **v2.** Remove the FEP-film specular reflections (`docs/07_fep_removal.md`). `false` = legacy-identical output. |
+| `fep_keep_level`, `fep_rank`, `fep_half_window`, `fep_search`, `fep_lateral_median`, `fep_frac_lo`, `fep_frac_hi`, `fep_detect_min_db`, `fep_max_surfaces`, `fep_shrink`, `fep_learn_basis`, `fep_basis_file` | see doc 07 | FEP-removal tuning (web app: *FEP removal options*). |
 
 **Validated preset:** GAN632 + Olympus 20x OCTG (WINTER): β = **8.949e7**, σ = 10. This
 reproduces the legacy reconstruction of the reference dataset bit-exactly. To register a
@@ -278,6 +287,8 @@ python -m octrecon web                                   # the web app (same as 
 python -m octrecon inspect  /data/sample/OCTVolume       # summary + automatic parameters (JSON)
 python -m octrecon reconstruct /data/sample/OCTVolume --output-root /data/recon --output-name sample_recon --device gpu
 python -m octrecon reconstruct /data/sample/OCTVolume --config my_config.json --rows 4
+python -m octrecon reconstruct /data/sample/OCTVolume --no-fep                # v1 / legacy-identical (no FEP removal)
+python -m octrecon reconstruct /data/sample/OCTVolume --set fep_keep_level=0.5
 python -m octrecon reconstruct /data/sample/OCTVolume --set dispersion_quadratic_term=8.9e7 focus_positions=433
 python -m octrecon estimate-dispersion /data/sample/OCTVolume
 python -m octrecon detect-focus /data/sample/OCTVolume
@@ -322,6 +333,7 @@ Details, benchmarks and validation are in `docs/oct_recon_AF_v1.pdf` and `docs/0
 | `docs/04_reconstruction_parameters.md` | Every input, where it comes from, what can be estimated. |
 | `docs/05_parameter_estimation.md` | Automatic dispersion / focus / drift estimation (Python ports). |
 | `docs/06_input_formats.md` | Supported raw formats and their validation against MATLAB. |
+| `docs/07_fep_removal.md` | **v2:** FEP-film reflection removal — method, parameters, results, limitations. |
 | `docs/oct_recon_AF_v1.pdf` | Technical report: acceleration analysis, benchmarks, validation. |
 
 ---
@@ -335,7 +347,7 @@ octrecon/                 Python package
   presets.py              system/probe constants (dispersion, focus sigma)
   io/                     ScanInfo, Thorlabs headers/chirp, tile readers (.oct / unzipped / ...), TIFF writer
   core/                   geometry, spectral processing (CPU/CUDA kernels), stitching,
-                          torch_backend.py (Apple GPU / MPS)
+                          torch_backend.py (Apple GPU / MPS), fep.py (FEP-film reflection removal, v2)
   estimation/             automatic dispersion / focus detection, drift fit, B-scan previews
   webapp/                 local web server + static UI (no internet needed)
   cli.py                  command line (python -m octrecon ...)

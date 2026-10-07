@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "octrecon"
-version = "1.0.0"
+version = "2.0.0"
 description = "GPU (NVIDIA CUDA / Apple MPS) and CPU reconstruction of tiled Thorlabs OCT volumes (Python port of myOCT yOCTProcessTiledScan) with a local web UI"
 readme = "README.md"
 license = { text = "GPL-3.0-or-later" }

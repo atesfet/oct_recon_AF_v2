@@ -114,9 +114,19 @@ class TorchSpectralProcessor:
         eq += mv
         spec = torch.complex(eq * self.win_re[:, None], eq * self.win_im[:, None])
         ft = torch.fft.ifft(spec, dim=0)[: self.nz]                 # (nZ, M)
+        if getattr(self, "_want_complex", False):
+            return ft.T.reshape(B, nX, self.nz)
         ri = torch.view_as_real(ft)
         mag = torch.sqrt(ri[..., 0] * ri[..., 0] + ri[..., 1] * ri[..., 1])
         return mag.T.reshape(B, nX, self.nz)
+
+    def scan(self, raw):
+        """complex scan (B, nX, N/2) as a torch tensor (for FEP removal)."""
+        self._want_complex = True
+        try:
+            return self.magnitude(raw)
+        finally:
+            self._want_complex = False
 
 
 class TorchTileStitcher:

@@ -20,7 +20,7 @@ from octrecon.retag import retag  # noqa: E402
 def run(tmp_path_factory):
     w = tmp_path_factory.mktemp("tiffmeta")
     vol = TF._make_tiled(w, "base")
-    s = Reconstructor(ReconConfig(volume_folder=str(vol), output_root=str(w / "out"), output_name="t",
+    s = Reconstructor(ReconConfig(fep_removal=False, volume_folder=str(vol), output_root=str(w / "out"), output_name="t",
                                   device="cpu", focus_positions=40, crop_z_range_mm="none"),
                       log=lambda m: None).run()
     return vol, Path(s["tiff"]), s

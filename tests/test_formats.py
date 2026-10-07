@@ -106,7 +106,7 @@ def _make_tile(root: Path, name: str) -> Path:
 
 def _recon(vol: Path, precision="float64", **kw):
     info = json.loads((vol / "synthetic_info.json").read_text())
-    cfg = ReconConfig(volume_folder=str(vol), device="cpu", precision=precision,
+    cfg = ReconConfig(fep_removal=False, volume_folder=str(vol), device="cpu", precision=precision,
                       dispersion_quadratic_term=info.get("dispersion", DISPERSION),
                       focus_positions=float(info["focus_pix"]),
                       focus_sigma=10, crop_z_range_mm="none", output_pixel_size_um=info.get("pixel_um", 2),

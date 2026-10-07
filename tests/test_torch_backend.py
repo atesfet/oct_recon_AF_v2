@@ -36,7 +36,7 @@ def work():
 
 def _recon(vol: Path, device: str):
     info = json.loads((vol / "synthetic_info.json").read_text())
-    cfg = ReconConfig(volume_folder=str(vol), device=device, precision="float32",
+    cfg = ReconConfig(fep_removal=False, volume_folder=str(vol), device=device, precision="float32",
                       dispersion_quadratic_term=info.get("dispersion", TF.DISPERSION),
                       focus_positions=float(info["focus_pix"]), focus_sigma=10, crop_z_range_mm="none",
                       output_pixel_size_um=info.get("pixel_um", 2), interp_method="sinc5",

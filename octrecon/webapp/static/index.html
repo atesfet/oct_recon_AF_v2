@@ -13,7 +13,7 @@
     <span class="logo">◉</span>
     <div>
       <h1>OCT Reconstruction</h1>
-      <p class="sub">Tiled Thorlabs OCT volumes · GPU/CPU port of myOCT <code>yOCTProcessTiledScan</code> · <span id="version">oct_recon_AF_v1</span></p>
+      <p class="sub">Tiled Thorlabs OCT volumes · GPU/CPU port of myOCT <code>yOCTProcessTiledScan</code> · <span id="version">oct_recon_AF_v2</span></p>
     </div>
   </div>
   <div id="sysbadges" class="badges"></div>
@@ -75,6 +75,26 @@
       </div>
     </div>
     <div id="focus-fig" class="fig hidden"></div>
+
+    <div class="fep-box">
+      <label class="check"><input type="checkbox" id="fep_removal" checked> <b>Remove FEP film reflections</b> (top / bottom surface of the film the tissue is sandwiched in)</label>
+      <p class="hint">The specular film surfaces are subtracted per A-line in the complex depth profile (PSF model learnt from the scan), keeping tissue signal. Turn off for a legacy-identical reconstruction.</p>
+      <details id="fep-advanced">
+        <summary>FEP removal options</summary>
+        <div class="form3">
+          <label>Background level kept at the surface (0–1)<input id="fep_keep_level" type="number" step="0.05" min="0" max="2" value="0.7"><span class="src">0 = remove all, 1 = keep full background energy</span></label>
+          <label>PSF basis rank<input id="fep_rank" type="number" min="1" max="6" value="3"></label>
+          <label>Half window R [px]<input id="fep_half_window" type="number" min="3" max="20" value="8"></label>
+          <label>Peak search ± [px]<input id="fep_search" type="number" min="1" max="10" value="4"></label>
+          <label>Lateral median [A-lines]<input id="fep_lateral_median" type="number" min="1" max="101" value="15"></label>
+          <label>Detection threshold [dB above baseline]<input id="fep_detect_min_db" type="number" step="0.5" value="6"></label>
+          <label>Specular-likeness: start (frac_lo)<input id="fep_frac_lo" type="number" step="0.05" min="0" max="1" value="0.35"></label>
+          <label>Specular-likeness: full (frac_hi)<input id="fep_frac_hi" type="number" step="0.05" min="0" max="1" value="0.6"></label>
+          <label>Max surfaces per B-scan<input id="fep_max_surfaces" type="number" min="1" max="8" value="4"></label>
+          <label class="check"><input type="checkbox" id="fep_learn_basis" checked> Learn PSF basis from the scan</label>
+        </div>
+      </details>
+    </div>
 
     <details id="advanced">
       <summary>Advanced options — constants of the OCT system / probe (auto-filled)</summary>

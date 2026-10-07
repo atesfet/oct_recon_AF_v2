@@ -42,6 +42,15 @@ from .io.volume import TileReader, extract_volume, scan_volume_layout
 DATA_DIR = Path(__file__).parent / "data"
 
 
+def _abs(xp, c, dtype):
+    """|complex| for numpy / cupy arrays and torch tensors (MPS-safe via view_as_real)."""
+    if hasattr(c, "detach"):
+        import torch
+        ri = torch.view_as_real(c)
+        return torch.sqrt(ri[..., 0] * ri[..., 0] + ri[..., 1] * ri[..., 1])
+    return xp.abs(c).astype(dtype, copy=False)
+
+
 class Cancelled(Exception):
     pass
 
@@ -73,6 +82,20 @@ class ReconConfig:
     write_tiff: bool = True
     keep_float_volume: bool = False
     legacy_double_quantization: bool = False
+    # --- v2: removal of specular reflections from the FEP films (see octrecon/core/fep.py) ---
+    fep_removal: bool = True
+    fep_rank: int = 3
+    fep_half_window: int = 8
+    fep_search: int = 4
+    fep_lateral_median: int = 15
+    fep_frac_lo: float = 0.35
+    fep_frac_hi: float = 0.60
+    fep_detect_min_db: float = 6.0
+    fep_max_surfaces: int = 4
+    fep_shrink: bool = True
+    fep_keep_level: float = 0.7
+    fep_learn_basis: bool = True
+    fep_basis_file: str | None = None          # .npy (2R+1, rank) complex; overrides learning
 
     @classmethod
     def from_dict(cls, d: dict):
@@ -189,6 +212,7 @@ class Reconstructor:
                 self.stitchers[(xi, zi)] = TorchTileStitcher(st, self.oc, self.xp) if torch_backend else st
         self.n_out = (len(self.tg.out_y_mm), len(self.tg.out_z_mm), len(self.tg.out_x_mm))
         self.prefetch = self._memory_safe_prefetch()
+        self.fep = self._build_fep() if cfg.fep_removal else None
         self.timers = {"io_wait": 0.0, "h2d": 0.0, "spectral": 0.0, "stitch": 0.0, "finalise": 0.0}
 
     def _memory_safe_prefetch(self) -> int:
@@ -213,6 +237,52 @@ class Reconstructor:
         if r is None:
             r = self._readers[folder] = TileReader(self.volume / folder)
         return r
+
+    def _fep_shift(self):
+        """Optical-path row shift per (frame, A-line); A-scan repeats share their position."""
+        h = self.hdr
+        if self.oc is None:
+            sh = np.zeros((h.size_y, h.size_x), np.int64)
+        else:
+            sh = np.asarray(self.oc.shift, np.int64)
+        return np.repeat(sh, max(1, h.ascan_avg), axis=1)
+
+    def _scan_numpy(self, folder, frames):
+        files = [f for fr_ in frames for f in self.frame_files(int(fr_))]
+        h = self.hdr
+        buf = np.empty((len(files), h.interf_size, h.n_lambda), np.dtype(h.raw_dtype))
+        self.reader(folder).read_bscans(files, buf)
+        return to_numpy(self.sp.scan(self.xp.asarray(buf)))
+
+    def _build_fep(self):
+        from .core.fep import FEPConfig, FEPRemover, learn_basis_from_volume
+        cfg = self.cfg
+        fc = FEPConfig(enabled=True, rank=cfg.fep_rank, half_window=cfg.fep_half_window, search=cfg.fep_search,
+                       lateral_median=cfg.fep_lateral_median, frac_lo=cfg.fep_frac_lo, frac_hi=cfg.fep_frac_hi,
+                       detect_min_db=cfg.fep_detect_min_db, max_surfaces=cfg.fep_max_surfaces,
+                       shrink=cfg.fep_shrink, keep_level=cfg.fep_keep_level, learn_basis=cfg.fep_learn_basis)
+        shift = self._fep_shift()
+        if cfg.fep_basis_file:
+            U = np.load(cfg.fep_basis_file)
+            info = {"source": f"file {cfg.fep_basis_file}"}
+        else:
+            si = self.si
+            zi0 = int(np.argmin(np.abs(si.z_depths_mm)))          # depth with the surface at focus
+            pick = []
+            for xi in np.unique(np.linspace(0, len(si.x_centers_mm) - 1, 4).round().astype(int)):
+                for yi in np.unique(np.linspace(0, len(si.y_centers_mm) - 1, 3).round().astype(int)):
+                    t = next((t for t in si.tiles if (t.xi, t.yi, t.zi) == (xi, yi, zi0)), None)
+                    if t is not None:
+                        pick.append((t.folder, t.zi))
+
+            def rows_for_zi(zi):
+                st = next(v for (x_, z_), v in self.stitchers.items() if z_ == zi and not v.empty)
+                return st.r0, st.r1
+            U, info = learn_basis_from_volume(lambda f, fr: self._scan_numpy(f, fr), pick, shift,
+                                              self.sg.window, rows_for_zi, fc, log=self.log)
+        self.fep_basis_info = info
+        self.log(f"FEP removal on: rank {fc.rank}, +-{fc.half_window} samples, basis from {info.get('source')}")
+        return FEPRemover(U, shift, fc, xp=self.xp)
 
     def frame_files(self, frame: int):
         """Raw file indices holding tile-local y frame `frame` (B-scan repeats consecutive)."""
@@ -274,7 +344,13 @@ class Reconstructor:
                 st = self.stitchers[(t.xi, t.zi)]
                 raw_d = xp.asarray(raw)
                 synchronize(xp); t2 = time.perf_counter(); self.timers["h2d"] += t2 - t1
-                mag = self.sp.magnitude(raw_d)
+                if self.fep is not None:
+                    c = self.sp.scan(raw_d)
+                    fr_scans = [int(f_) for f_ in fr for _ in range(max(1, hdr.bscan_avg))]
+                    c = self.fep.process(c, fr_scans, st.r0, st.r1)
+                    mag = _abs(xp, c, self.dtype)
+                else:
+                    mag = self.sp.magnitude(raw_d)
                 # legacy yOCTProcessTiledScan.m l.288-291: abs, then mean over the trailing
                 # dims of (z, x, AScanAvg, BScanAvg): B-scan repeats first, then A-scan repeats
                 mag = average_repeats(mag, len(fr), hdr)
@@ -395,6 +471,8 @@ class Reconstructor:
         md = self.metadata(y_sel)
         acq = self.acquisition(md, shape)
         summary = {"device": self.device, "rows": rows, "output_dir": str(out_dir),
+                   "fep_removal": (dict(self.fep.summary(), basis=getattr(self, "fep_basis_info", None))
+                                   if self.fep is not None else None),
                    "voxel_size_um": acq["output"]["voxel_size_um"], "acquisition": acq,
                    "output_shape_yzx": list(shape), "clim_dB": clim,
                    "reconstruction_seconds": recon_s, "timers": self.timers,

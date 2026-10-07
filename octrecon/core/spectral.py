@@ -136,6 +136,10 @@ class SpectralProcessor:
     def magnitude(self, raw):
         """raw (B, interfSize, N) int16/uint16/float -> |scan| (B, nX, N/2), float.
         nX = A-lines after the apodization lines and after AScanBinning."""
+        return self.xp.abs(self.scan(raw)).astype(self.dtype, copy=False)
+
+    def scan(self, raw):
+        """raw (B, interfSize, N) -> complex scan (B, nX, N/2) (same fast path as magnitude)."""
         xp = self.xp
         raw = self.prepare(raw)
         if xp is np and self.use_numba:
@@ -150,7 +154,7 @@ class SpectralProcessor:
         else:
             spec = self._linearise_prepared(raw) * self.window
         ft = self._ifft(spec)
-        return xp.abs(ft[..., : self.nz]).astype(self.dtype, copy=False)
+        return ft[..., : self.nz]
 
     def complex_scan(self, raw):
         xp = self.xp
