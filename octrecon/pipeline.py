@@ -15,6 +15,13 @@ Output: <output_root>/<output_name>/
     <output_name>_dB_float32.npy       optional float32 dB volume (y, z, x)
     <output_name>_config.json          fully resolved parameters + their sources
     <output_name>_run_summary.json     timings, clim, device
+  v2 (optional, see ReconConfig):
+    <output_name>_xy_mean.tif / _xy_max.tif     tissue-only en-face projections, float32 dB (NaN = no tissue)
+    <output_name>_xy_mean.png / _xy_max.png     8-bit previews
+    <output_name>_tissue_thickness_um.tif       tissue slab thickness used for the projection
+    <output_name>_fep_removed.tiff (+ .json)    removed FEP signal, uint16 volume (legacy format)
+    <output_name>_fep_removed_xy.tif / .png     its mean projection over all z
+    <output_name>_fep_overview.png              projection / removed signal / B-scans at a glance
     <output_name>.log                  run log
 """
 from __future__ import annotations
@@ -96,6 +103,14 @@ class ReconConfig:
     fep_keep_level: float = 0.7
     fep_learn_basis: bool = True
     fep_basis_file: str | None = None          # .npy (2R+1, rank) complex; overrides learning
+    fep_save_removed: bool = True              # also save the removed (subtracted) signal volume + projection
+    # --- v2: tissue-only xy (en-face) projection (see octrecon/core/projection.py) ---
+    xy_projection: bool = True
+    xy_projection_tissue_only: bool = True     # False: project over all z
+    tissue_smooth_um: float = 30.0             # lateral smoothing for the tissue mask
+    tissue_threshold_db: object = "auto"       # auto (Otsu) | number (dB)
+    tissue_max_hole_mm2: float = 0.05          # enclosed non-tissue holes smaller than this are filled
+    tissue_min_area_mm2: float = 0.005         # tissue specks smaller than this are dropped
 
     @classmethod
     def from_dict(cls, d: dict):
@@ -290,16 +305,19 @@ class Reconstructor:
         return [frame * n + a for a in range(n)]
 
     # ------------------------------------------------------------------ core
-    def process_row(self, yi: int, frames=None, pool=None, on_batch=None):
+    def process_row(self, yi: int, frames=None, pool=None, on_batch=None, return_removed=False):
         """Reconstruct output planes of y-tile row `yi`.
         frames: tile-local frame indices (0-based) to produce; default all.
-        Returns float32 dB array (nFrames, nOutZ, nOutX) on host."""
+        Returns float32 dB array (nFrames, nOutZ, nOutX) on host; with return_removed (and FEP
+        removal on) also the removed signal |s - s'| stitched with the same weights (dB)."""
         xp, cfg, hdr = self.xp, self.cfg, self.hdr
         frames = np.arange(self.si.n_y_px) if frames is None else np.asarray(frames)
         nF = len(frames)
         _, nz_out, nx_out = self.n_out
         num = xp.zeros((nF, nz_out, nx_out), self.dtype)
         den = xp.zeros((nF, nz_out, nx_out), self.dtype)
+        want_rm = bool(return_removed and self.fep is not None)
+        num_rm = xp.zeros((nF, nz_out, nx_out), self.dtype) if want_rm else None
 
         tiles = self.si.tiles_in_row(yi)
         B = cfg.batch_frames
@@ -346,9 +364,13 @@ class Reconstructor:
                 synchronize(xp); t2 = time.perf_counter(); self.timers["h2d"] += t2 - t1
                 if self.fep is not None:
                     c = self.sp.scan(raw_d)
+                    c_in = c.clone() if (want_rm and hasattr(c, "clone")) else (c.copy() if want_rm else None)
                     fr_scans = [int(f_) for f_ in fr for _ in range(max(1, hdr.bscan_avg))]
                     c = self.fep.process(c, fr_scans, st.r0, st.r1)
                     mag = _abs(xp, c, self.dtype)
+                    if want_rm:
+                        rm = average_repeats(_abs(xp, c_in - c, self.dtype), len(fr), hdr)
+                        del c_in
                 else:
                     mag = self.sp.magnitude(raw_d)
                 # legacy yOCTProcessTiledScan.m l.288-291: abs, then mean over the trailing
@@ -358,6 +380,8 @@ class Reconstructor:
                 n_, d_ = st.contribute(mag, xp.asarray(fr))
                 num[s:s + len(fr), :, st.c0:st.c1] += n_
                 den[s:s + len(fr), :, st.c0:st.c1] += d_
+                if want_rm:
+                    num_rm[s:s + len(fr), :, st.c0:st.c1] += st.contribute(rm, xp.asarray(fr))[0]
                 synchronize(xp); self.timers["stitch"] += time.perf_counter() - t3
                 n_done += 1
                 if on_batch:
@@ -373,8 +397,11 @@ class Reconstructor:
         den[den < min_weight_threshold(self.dtype)] = xp.nan
         with np.errstate(divide="ignore", invalid="ignore"):
             db = 20 * xp.log10(num / den)
+            db_rm = 20 * xp.log10(num_rm / den) if want_rm else None
         out = to_numpy(db).astype(np.float32, copy=False)
         self.timers["finalise"] += time.perf_counter() - t0
+        if return_removed:
+            return out, (to_numpy(db_rm).astype(np.float32, copy=False) if want_rm else None)
         return out
 
     def global_y_to_row(self, y_index0: int):
@@ -441,6 +468,10 @@ class Reconstructor:
         npy = out_dir / f"{name}_dB_float32.npy"
         vol = np.lib.format.open_memmap(npy, mode="w+", dtype=np.float32, shape=shape)
         plane_clims = np.full((shape[0], 2), np.nan)
+        save_rm = bool(cfg.fep_save_removed and self.fep is not None)
+        npy_rm = out_dir / f"{name}_fep_removed_dB_float32.npy"
+        vol_rm = np.lib.format.open_memmap(npy_rm, mode="w+", dtype=np.float32, shape=shape) if save_rm else None
+        rm_clims = np.full((shape[0], 2), np.nan)
         t_start = time.perf_counter()
         try:
             with ThreadPoolExecutor(cfg.io_threads) as pool:
@@ -454,8 +485,12 @@ class Reconstructor:
                                       row=k + 1, rows=len(rows), elapsed_s=el,
                                       eta_s=el / frac * (1 - frac) if frac > 0 else None)
 
-                    db = self.process_row(r, pool=pool, on_batch=on_batch)
+                    db, db_rm = self.process_row(r, pool=pool, on_batch=on_batch, return_removed=True)
                     vol[k * ny:(k + 1) * ny] = db
+                    if save_rm:
+                        vol_rm[k * ny:(k + 1) * ny] = db_rm
+                        for i, p in enumerate(db_rm):
+                            rm_clims[k * ny + i] = tiff_writer.plane_clim(p)
                     for i, p in enumerate(db):
                         plane_clims[k * ny + i] = tiff_writer.plane_clim(p)
                     el = time.perf_counter() - t_start
@@ -465,6 +500,8 @@ class Reconstructor:
             for r_ in self._readers.values():
                 r_.close()
         vol.flush()
+        if save_rm:
+            vol_rm.flush()
         recon_s = time.perf_counter() - t_start
 
         clim = (float(np.nanmin(plane_clims[:, 0])), float(np.nanmax(plane_clims[:, 1])))
@@ -490,11 +527,22 @@ class Reconstructor:
             summary["tiff_seconds"] = time.perf_counter() - t0
             summary["tiff"] = str(tif)
             log(f"wrote {tif} in {summary['tiff_seconds']:.0f}s")
+        if cfg.xy_projection or save_rm:
+            from .outputs_v2 import write_v2_outputs
+            t0 = time.perf_counter()
+            summary.update(write_v2_outputs(self, out_dir, name, vol, vol_rm, clim, rm_clims, md, acq))
+            summary["v2_outputs_seconds"] = time.perf_counter() - t0
         del vol
         if not cfg.keep_float_volume:
             npy.unlink()
         else:
             summary["float_volume"] = str(npy)
+        if save_rm:
+            del vol_rm
+            if not cfg.keep_float_volume:
+                npy_rm.unlink()
+            else:
+                summary["fep_removed_float_volume"] = str(npy_rm)
         with open(out_dir / f"{name}_run_summary.json", "w") as f:
             json.dump(summary, f, indent=2, default=str)
         self.progress(stage="done", done=1, total=1)

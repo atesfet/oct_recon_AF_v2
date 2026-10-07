@@ -166,6 +166,11 @@ function buildConfig() {
     rows: parseRows($("rows").value), write_tiff: $("write_tiff").checked, keep_float_volume: $("keep_float_volume").checked,
     legacy_double_quantization: $("legacy_double_quantization").checked,
     fep_removal: $("fep_removal").checked, fep_learn_basis: $("fep_learn_basis").checked,
+    fep_save_removed: $("fep_save_removed").checked,
+    xy_projection: $("xy_projection").checked, xy_projection_tissue_only: $("xy_projection_tissue_only").checked,
+    tissue_smooth_um: parseNum($("tissue_smooth_um").value), tissue_max_hole_mm2: parseNum($("tissue_max_hole_mm2").value),
+    tissue_min_area_mm2: parseNum($("tissue_min_area_mm2").value),
+    tissue_threshold_db: $("tissue_threshold_db").value.trim() === "" ? "auto" : parseNum($("tissue_threshold_db").value),
   };
   for (const k of FEP_NUM) cfg[k] = parseNum($(k).value);
   const m = $("focus_mode").value;
@@ -187,7 +192,9 @@ function applyConfig(c) {
   for (const k of ["precision", "interp_method", "raw_input"]) if (c[k]) $(k).value = c[k];
   for (const k of ["batch_frames", "io_threads", "prefetch_batches"]) if (c[k]) $(k).value = c[k];
   for (const k of ["gpu_fused_kernel", "write_tiff", "keep_float_volume", "legacy_double_quantization"]) if (c[k] !== undefined) $(k).checked = !!c[k];
-  for (const k of ["fep_removal", "fep_learn_basis"]) if (c[k] !== undefined) $(k).checked = !!c[k];
+  for (const k of ["fep_removal", "fep_learn_basis", "fep_save_removed", "xy_projection", "xy_projection_tissue_only"]) if (c[k] !== undefined) $(k).checked = !!c[k];
+  for (const k of ["tissue_smooth_um", "tissue_max_hole_mm2", "tissue_min_area_mm2"]) if (c[k] !== undefined && c[k] !== null) $(k).value = c[k];
+  if (c.tissue_threshold_db !== undefined) $("tissue_threshold_db").value = c.tissue_threshold_db === "auto" ? "" : c.tissue_threshold_db;
   for (const k of FEP_NUM) if (c[k] !== undefined && c[k] !== null) $(k).value = c[k];
   if (c.apply_path_length_correction !== undefined) $("opc").checked = !!c.apply_path_length_correction;
   if (c.rows) $("rows").value = c.rows.join(",");
@@ -213,6 +220,7 @@ async function pollJob() {
       (p.elapsed_s ? ` · elapsed ${fmtT(p.elapsed_s)}` : "") + (p.eta_s ? ` · ETA ${fmtT(p.eta_s)}` : ""); }
   else if (p.stage === "extract") { pct = 100 * p.done / p.total; txt = `Extracting .oct archives ${p.done}/${p.total}`; }
   else if (p.stage === "write_tiff") { pct = 100 * p.done / p.total; txt = `Writing BigTIFF ${p.done}/${p.total} planes`; }
+  else if (p.stage === "projection") { pct = 100 * p.done / Math.max(p.total, 1); txt = `Tissue mask + xy projection · ${pct.toFixed(0)} %`; }
   else if (j.state === "starting") txt = "Preparing (reading headers, building operators)…";
   if (j.state === "done") pct = 100;
   $("progress-bar").style.width = `${pct}%`; $("progress-text").textContent = txt;
@@ -228,7 +236,10 @@ function showResult(j) {
     const s = j.summary;
     r.innerHTML = `<div class="note ok"><b>✓ Reconstruction finished</b> in ${fmtT(s.reconstruction_seconds + (s.tiff_seconds || 0))} on ${s.device.toUpperCase()} ·
       output ${s.output_shape_yzx.join("×")} (y×z×x) · clim [${s.clim_dB.map((x) => x.toFixed(2)).join(", ")}] dB<br>
-      <code>${s.tiff || s.output_dir}</code></div>
+      <code>${s.tiff || s.output_dir}</code>
+      ${s.xy_projection ? `<br>xy projection (${s.xy_projection.mode}): <code>${s.xy_projection.files.mean.tif}</code>` : ""}
+      ${s.fep_removed ? `<br>removed FEP signal: <code>${s.fep_removed.tiff}</code>` : ""}
+      ${s.overview_png ? `<br>overview figure: <code>${s.overview_png}</code>` : ""}</div>
       <div class="row" style="margin-top:8px"><button class="secondary" id="btn-open">Open output folder</button></div>`;
     $("btn-open").onclick = () => api("/api/open", { path: s.output_dir }).catch((e) => toast(e.message, true));
   } else if (j.state === "error") r.innerHTML = `<div class="note warn"><b>Error:</b> ${j.error}</div>`;

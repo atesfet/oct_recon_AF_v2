@@ -33,6 +33,8 @@ def main(argv=None):
     r.add_argument("--device", default="auto", choices=["auto", "gpu", "cpu", "mps"]); r.add_argument("--config")
     r.add_argument("--rows", help="comma separated y-tile rows (0-based)")
     r.add_argument("--no-fep", action="store_true", help="disable FEP-film reflection removal (legacy-identical output)")
+    r.add_argument("--no-projection", action="store_true", help="do not save the tissue-only xy projection")
+    r.add_argument("--v1", action="store_true", help="v1 / legacy-identical reconstruction (= --no-fep --no-projection)")
     r.add_argument("--set", nargs="*", default=[], metavar="KEY=VALUE", help="any ReconConfig field, JSON values allowed")
     d = sub.add_parser("estimate-dispersion"); d.add_argument("volume"); d.add_argument("--device", default="auto")
     f = sub.add_parser("detect-focus"); f.add_argument("volume"); f.add_argument("--dispersion", type=float); f.add_argument("--device", default="auto")
@@ -58,8 +60,10 @@ def main(argv=None):
         base["output_name"] = a.output_name or base.get("output_name") or f"{Path(a.volume).resolve().parent.name}_recon"
         if a.rows:
             base["rows"] = [int(v) for v in a.rows.split(",")]
-        if a.no_fep:
+        if a.no_fep or a.v1:
             base["fep_removal"] = False
+        if a.no_projection or a.v1:
+            base["xy_projection"] = False
         for kv in a.set:
             k, v = kv.split("=", 1); base[k] = _val(v)
         s = Reconstructor(ReconConfig.from_dict(base), log=lambda m: print(m, flush=True)).run()
