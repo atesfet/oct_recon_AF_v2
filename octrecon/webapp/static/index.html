@@ -70,7 +70,7 @@
       </label>
       <div class="tools">
         <button class="secondary" id="btn-detect-focus">Detect focus</button>
-        <button class="secondary" id="btn-preview">Preview B-scan…</button>
+        <button class="secondary" id="btn-focus-tool">Choose focus positions…</button>
         <span id="focus-status" class="muted"></span>
       </div>
     </div>
@@ -80,8 +80,8 @@
       <summary>Advanced options — constants of the OCT system / probe (auto-filled)</summary>
       <div class="form3">
         <label>Dispersion quadratic term β [nm²/rad]
-          <div class="row"><input id="dispersion" type="text"><button class="secondary" id="btn-est-disp">Estimate</button></div>
-          <span class="src" id="src-dispersion"></span>
+          <div class="row"><input id="dispersion" type="text"><button class="secondary" id="btn-est-disp">Estimate</button><button class="secondary" id="btn-tune-disp">Tune manually…</button></div>
+          <span class="src" id="src-dispersion_quadratic_term"></span>
         </label>
         <label>Focus σ (z-stitching width) [px]
           <input id="focus_sigma" type="text"><span class="src" id="src-focus_sigma"></span>
@@ -174,27 +174,83 @@
   </div>
 </div>
 
-<!-- B-scan preview modal -->
-<div id="pmodal" class="modal hidden">
-  <div class="modal-box wide">
+<!-- Dispersion tuner (port of Demo_DispersionCorrectionManual.m) -->
+<div id="dmodal" class="modal hidden">
+  <div class="modal-box wide tool">
     <div class="modal-head">
-      <b>B-scan preview — click on the focus band to set the focus pixel</b>
-      <button class="icon" id="pmodal-close">✕</button>
+      <b>Manual dispersion correction <span class="muted">— Demo_DispersionCorrectionManual</span></b>
+      <button class="icon" id="dmodal-close">✕</button>
     </div>
-    <div class="row">
-      <label>Depth tile <select id="p-zi"></select></label>
-      <button class="secondary" id="p-refresh">Refresh</button>
-      <span id="p-info" class="muted"></span>
+    <div class="tool-body">
+      <aside class="nav-panel">
+        <div class="nav-title">Tile (Data folder)</div>
+        <div id="d-map" class="tile-map" title="click a tile"></div>
+        <div class="nav-row"><button class="secondary sm" data-dnav="z,-1">‹</button><span id="d-zlab" class="nav-lab"></span><button class="secondary sm" data-dnav="z,1">›</button></div>
+        <div class="nav-row"><button class="secondary sm" data-dnav="x,-1">‹</button><span id="d-xlab" class="nav-lab"></span><button class="secondary sm" data-dnav="x,1">›</button></div>
+        <div class="nav-row"><button class="secondary sm" data-dnav="y,-1">‹</button><span id="d-ylab" class="nav-lab"></span><button class="secondary sm" data-dnav="y,1">›</button></div>
+        <div class="nav-row"><select id="d-folder" class="sm"></select></div>
+        <div class="nav-title">B-scan (Y frame)</div>
+        <div class="nav-row"><button class="secondary sm" data-dnav="f,-1">‹</button><input id="d-frame" type="number" min="1" class="sm"><button class="secondary sm" data-dnav="f,1">›</button></div>
+        <input id="d-frame-slider" type="range" min="1" step="1">
+        <label class="check sm"><input type="checkbox" id="d-legacy-axis"> Legacy wavelength axis (exactly as the MATLAB demo)</label>
+        <p class="muted sm">Keys: ←/→ slider ±0.01 (Shift ±0.1) · [ / ] B-scan · PgUp/PgDn depth</p>
+      </aside>
+      <section class="view-panel">
+        <div id="d-title" class="plot-title"></div>
+        <div class="img-wrap"><img id="d-img" alt=""><div id="d-busy" class="busy hidden">…</div></div>
+        <div class="slider-row">
+          <span class="muted">log10(dispersionQuadraticTerm)</span>
+          <button class="secondary sm" data-dstep="-0.1">«</button><button class="secondary sm" data-dstep="-0.01">‹</button>
+          <input id="d-slider" type="range" min="-10" max="10" step="0.01">
+          <button class="secondary sm" data-dstep="0.01">›</button><button class="secondary sm" data-dstep="0.1">»</button>
+          <input id="d-slider-val" type="number" step="0.01" class="sm num">
+        </div>
+        <div class="row">
+          <label class="inline">β [nm²/rad] <input id="d-beta" type="text" class="sm"></label>
+          <span id="d-sharp" class="muted"></span>
+          <span class="spacer"></span>
+          <button class="secondary" id="d-reset">Back to auto value</button>
+          <button class="primary" id="d-use">Use this value</button>
+        </div>
+      </section>
     </div>
-    <div class="pimg-wrap"><img id="p-img" alt=""><div id="p-line" class="hidden"></div></div>
-    <div class="modal-foot">
-      <span class="muted" id="p-click"></span>
-      <button class="primary" id="p-use">Use this focus for all depths</button>
+  </div>
+</div>
+
+<!-- Choose focus positions (port of yOCTMeasureFocusDrift.m) -->
+<div id="fmodal" class="modal hidden">
+  <div class="modal-box wide tool">
+    <div class="modal-head">
+      <b>Choose Focus Positions <span class="muted">— yOCTMeasureFocusDrift</span></b>
+      <button class="icon" id="fmodal-close" title="close without saving">✕</button>
     </div>
+    <div id="f-title" class="plot-title pre"></div>
+    <div class="canvas-wrap"><canvas id="f-canvas" width="1100" height="560"></canvas><div id="f-busy" class="busy hidden">…</div></div>
+    <div class="f-controls">
+      <div class="f-sliders">
+        <label class="inline">Brightness <input id="f-bright" type="range" min="-1" max="1" step="0.01" value="-0.2"></label>
+        <label class="inline">Contrast <input id="f-contrast" type="range" min="0.3" max="3" step="0.01" value="1.5"></label>
+        <span id="f-hover" class="muted"></span>
+      </div>
+      <pre id="f-drift" class="drift-box">Drift so far: need &gt;= 2 clicked points</pre>
+    </div>
+    <div class="f-nav">
+      <button class="secondary sm" data-fnav="b,-1">‹ B-scan</button><span id="f-blab" class="nav-lab"></span><button class="secondary sm" data-fnav="b,1">B-scan ›</button>
+      <button class="secondary sm" data-fnav="x,-1">‹ X tile</button><span id="f-xlab" class="nav-lab"></span><button class="secondary sm" data-fnav="x,1">X tile ›</button>
+      <button class="secondary sm" data-fnav="d,-1">‹ Depth</button><span id="f-dlab" class="nav-lab"></span><button class="secondary sm" data-fnav="d,1">Depth ›</button>
+    </div>
+    <div class="f-actions">
+      <button class="primary" id="f-accept">Accept focus &amp; Next</button>
+      <button class="secondary" id="f-skip">Can't see focus - Skip depth</button>
+      <button class="secondary" id="f-stop">Stop measuring here</button>
+      <label class="check sm"><input type="checkbox" id="f-also-volume"> Also save into the raw volume folder (legacy location; an existing file is kept as _backup)</label>
+    </div>
+    <div id="f-result" class="hidden"></div>
   </div>
 </div>
 
 <div id="toast" class="toast hidden"></div>
 <script src="/static/app.js"></script>
+<script src="/static/tools.js"></script>
 </body>
 </html>

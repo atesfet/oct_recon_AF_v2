@@ -214,3 +214,35 @@ OCT_TEST_VOLUME=/media/atesfet/TS801/Q3_OCT_reconstruction/10um_FOV_1/OCTVolume 
   profile, and with `tile_selection='legacy'` the corner tile may contain no tissue.
 * The GPU path uses the same code through CuPy (`xp.partition`, `xp.fft`). It was not exercised during
   validation because the GPU driver was unavailable; all numbers above are CPU numbers.
+
+
+## Interactive tools (manual counterparts, web app)
+
+`octrecon/estimation/interactive.py` + `octrecon/webapp/static/tools.js` port the two
+interactive MATLAB figures of the legacy workflow.
+
+| Legacy | Web app | What is reproduced |
+|---|---|---|
+| `Demo_DispersionCorrectionManual.m` | *Tune manually…* (dispersion) | Y frame of a Data folder, pchip `yOCTEquispaceInterf` once, slider v ∈ [−10, 10] → β = sign(v)·10^|v| (steps 0.01 / 0.1, as `SliderStep [0.0005 0.1]` × range 20), `log(abs(scanCpx))` with `caxis([-5 6])`. Additions: tile map / depth / x / y / B-scan navigation, numeric β entry, sharpness guide value. |
+| `yOCTMeasureFocusDrift.m` (`measureFocus`, `renderTileBScan`, `onAdjustDisplay`, `onClickFocus`, navigation callbacks, `updateDriftReadout`, `getFocusForAllDepths`, `plotFocusDrift`) | *Choose focus positions…* | depth selection, start tile/B-scan, sticky X tile and B-scan across depths, `reconstructCenterBScan` (pchip + optical-path correction), `mag2db` display with the 5 / 99.8 % (`prctile`) base range and the brightness/contrast mapping, nearest-pixel click, blue predicted line, Accept/Skip/Stop/prev/next semantics, the fit for all depths, `.mat` (focusPositionInImageZpix, zDepths_mm, focusTable as a struct, fitDiagnostics) and the drift figure. |
+
+Validation against MATLAB R2024a on 10um_FOV_1 (`validation/matlab/make_interactive_reference.m`):
+
+| Item | Max difference |
+|---|---|
+| Dispersion tool ln-image, β = 100 / 8.949e7 / −1.2e8 (legacy wavelength axis) | 4.5e-13 / 2.0e-11 / 3.6e-11 |
+| Focus window default B-scan (Data428, B-scan 250), dB | 5.5e-9 |
+| z axis / x axis | 2.2e-16 / 5.6e-17 mm |
+| Display base range (5 / 99.8 %) | identical (MATLAB `prctile` = numpy `hazen`) |
+| Drift fit on 5 example clicks (focus vector, slope, RI, rejected click) | identical |
+| Your original single click (433 px at z = 0) | `[433 × 8]`, identical to the legacy `zChosenFocusPositions.mat` |
+
+Notes:
+* The demo calls the loader without `octSystem`, so a GAN632 is auto-detected as
+  "Ganymede". This gives a 0.23 nm different wavelength axis and a ~0.06 % different
+  optimal β. The web tool uses the scan's system by default; the *Legacy wavelength axis*
+  checkbox reproduces the demo exactly.
+* Closing the focus window with ✕ discards the session. *Stop measuring here* finishes
+  with the depths accepted so far, as closing the MATLAB window did.
+* The `.mat` stores `focusTable` as a struct of columns: a MATLAB `table` cannot be
+  written from Python. The reconstruction only reads `focusPositionInImageZpix`.

@@ -12,6 +12,7 @@ the `addpath` lines.
 | `validate_full_volume.py` | Compares two reconstruction TIFFs plane by plane (e.g. port vs legacy): NaN mask, ΔdB, LSB histogram, comparison images. |
 | `matlab/run_legacy_full.m` | Full-volume timing run of legacy `yOCTProcessTiledScan`. Warning: the default 8-worker pool needs more than 14 GB RAM. |
 | `matlab/bench_legacy_parfor.m` | Legacy parfor throughput micro-benchmark. |
+| `matlab/make_interactive_reference.m` + `validate_interactive_tools.py` | Reference images of the two interactive legacy figures (Demo_DispersionCorrectionManual, the "Choose Focus Positions" window) and the drift fit; the Python script compares the web-app engines with them. |
 | `matlab/run_legacy_synthetic.m`, `dump_synthetic_plane.m`, `dump_legacy_loader.m`, `make_legacy_simulated_scan.m` | Build the MATLAB references for `tests/test_formats.py` (`python tests/test_formats.py --build-reference`). |
 
 Results on the reference dataset (10um_FOV_1, 956 GB):

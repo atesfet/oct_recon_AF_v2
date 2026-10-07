@@ -108,6 +108,45 @@ python launch.py                              # --port 8765 --no-browser
    **Save config… / Load config…** store and restore every setting as JSON, which is also
    usable from the CLI.
 
+### Interactive tools (ports of the legacy MATLAB figures)
+
+**Manual dispersion correction.** Use *Advanced options → Dispersion → Tune manually…*. It
+is a port of `Demo_DispersionCorrectionManual.m`:
+* **Choosing the data:** pick any **Data folder** with the clickable tile map (x × y), the
+  ‹ › buttons for depth / x / y, or the folder list, then pick the **B-scan**.
+* **Linearization:** the B-scan is k-linearised once (pchip, as in the demo). Moving the
+  slider then only changes the dispersion phase, about 0.1 s per step.
+* **Slider:** `log10(dispersionQuadraticTerm)` over [−10, 10], with β = sign(v)·10^|v|.
+  Use ‹ › for ±0.01 and « » for ±0.1. Keys: ←/→ (Shift for ±0.1), `[` `]` for B-scan,
+  PgUp/PgDn for depth.
+* **Display:** ln|scan| with fixed limits [−5, 6], as the MATLAB figure.
+* **Applying:** *Use this value* copies β into the reconstruction settings.
+* **Legacy wavelength axis:** this checkbox reproduces the MATLAB demo bit-for-bit. The
+  demo auto-detects a GAN632 as "Ganymede" (796.23–1010.02 nm instead of 796–1010 nm); the
+  default uses the scan's own system, i.e. the same axis as the reconstruction.
+
+**Choose focus positions.** Use *Reconstruction inputs → Choose focus positions…*. It is a
+port of the `yOCTMeasureFocusDrift` window:
+* **Depths offered:** the same depths the legacy tool offers (first 50 µm inside the tissue,
+  then every 50 µm; shallow scans start at z = 0).
+* **Start:** the central X tile, central row and middle B-scan. The B-scan is reconstructed
+  exactly as in the legacy tool (pchip, chosen dispersion, optical-path correction) and
+  shown in dB with **Brightness / Contrast**.
+* **Picking:** **click the focus band** to place the **yellow line**. A **blue dashed line**
+  shows the focus predicted from the robust drift fit of the depths accepted so far.
+* **Buttons:** *Accept focus & Next*, *Can't see focus – Skip depth*, *Stop measuring
+  here*, and ‹ › for **B-scan**, **X tile** and **Depth**. A live drift readout shows the
+  slope and tissue RI.
+* **Finishing:** the robust fit (`yOCTMeasureFocusDrift_fitDrift`) gives a focus for every
+  depth. It is saved as `zChosenFocusPositions.mat` + `.png` (drift plot) in the
+  reconstruction's output folder, and optionally in the raw volume folder like legacy (an
+  existing file there is kept as `zChosenFocusPositions_backup.mat`).
+* **Applying:** *Use these focus positions* selects the saved file for the reconstruction.
+
+Both tools are checked against the original MATLAB figures on the reference dataset: the
+images agree to ≤ 4e-11 (dispersion) and 6e-9 dB (focus), and the fitted focus vectors are
+identical (`tests/test_interactive_tools.py`, `validation/validate_interactive_tools.py`).
+
 View the result in Fiji/ImageJ (*File → Import → TIFF Virtual Stack* for large volumes), in
 napari, or in MATLAB with myOCT's `yOCTFromTif`.
 

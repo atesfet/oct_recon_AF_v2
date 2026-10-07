@@ -121,46 +121,6 @@ async function detectFocus() {
 }
 function showFig(id, b64) { const el = $(id); if (!b64) return el.classList.add("hidden"); el.innerHTML = `<img src="data:image/png;base64,${b64}">`; el.classList.remove("hidden"); }
 
-// preview modal ----------------------------------------------------------
-let P = { shape: null, pix: null, z0: 0 };
-function openPreview() {
-  if (!S.info) return toast("Inspect a volume first", true);
-  const sel = $("p-zi"); sel.innerHTML = "";
-  S.info.scan.z_depths_mm.forEach((z, i) => { const o = document.createElement("option"); o.value = i; o.textContent = `#${i + 1}: z = ${(z * 1000).toFixed(0)} µm`; sel.appendChild(o); });
-  const i0 = S.info.scan.z_depths_mm.reduce((b, z, i, a) => (Math.abs(z) < Math.abs(a[b]) ? i : b), 0);
-  sel.value = i0; $("pmodal").classList.remove("hidden"); refreshPreview();
-}
-async function refreshPreview() {
-  $("p-info").textContent = "reconstructing B-scan…"; $("p-line").classList.add("hidden");
-  try {
-    const f = currentFocus();
-    const r = await api("/api/preview", { volume_folder: S.info.volume_folder, zi: +$("p-zi").value, device: device(),
-      dispersion_quadratic_term: dispersionValue(), focus: f ? f[+$("p-zi").value] : null });
-    P.shape = r.shape; P.z0 = r.z0 || 0;
-    const img = $("p-img");
-    img.onload = () => { const fp = f ? f[+$("p-zi").value] : (r.focus_hint ? [].concat(r.focus_hint)[0] : null); if (fp) drawLine(fp, "current focus"); };
-    img.src = "data:image/png;base64," + r.png;
-    $("p-info").textContent = `${r.tile || ""} frame ${r.frame ?? ""} · ${r.shape[0]} z-px`;
-  } catch (e) { $("p-info").textContent = ""; toast(e.message, true); }
-}
-function drawLine(pix, label) {
-  const img = $("p-img"), line = $("p-line");
-  line.style.top = (img.offsetTop + (pix - 1 - P.z0 + 0.5) / P.shape[0] * img.clientHeight) + "px";
-  line.classList.remove("hidden"); $("p-click").textContent = `${label}: ${Math.round(pix)} px`;
-}
-function previewClick(ev) {
-  if (!P.shape) return;
-  const img = $("p-img"), rect = img.getBoundingClientRect();
-  const frac = (ev.clientY - rect.top) / rect.height;
-  P.pix = Math.floor(P.z0 + frac * P.shape[0]) + 1;  // 1-based pixel
-  drawLine(P.pix, "selected focus pixel");
-}
-function useClickedFocus() {
-  if (!P.pix) return toast("Click on the focus band first", true);
-  $("focus_mode").value = "value"; onFocusMode(); $("focus_value").value = String(P.pix);
-  $("src-focus").textContent = `manual selection in B-scan preview: ${P.pix} px (all depths)`;
-  $("pmodal").classList.add("hidden");
-}
 function currentFocus() {
   const m = $("focus_mode").value;
   if (m === "value") { const v = $("focus_value").value.split(/[,\s]+/).map(parseNum).filter((x) => x !== null); if (!v.length) return null;
@@ -309,8 +269,6 @@ window.addEventListener("DOMContentLoaded", async () => {
   $("output_root").oninput = $("output_name").oninput = () => { updatePath(); save(); };
   $("focus_mode").onchange = onFocusMode;
   $("btn-detect-focus").onclick = detectFocus;
-  $("btn-preview").onclick = openPreview; $("p-refresh").onclick = refreshPreview; $("p-zi").onchange = refreshPreview;
-  $("p-img").onclick = previewClick; $("p-use").onclick = useClickedFocus; $("pmodal-close").onclick = () => $("pmodal").classList.add("hidden");
   $("btn-est-disp").onclick = estimateDispersion;
   for (const [key, field] of Object.entries(AUTO_FIELDS)) $(field).addEventListener("input", () => { S.touched[key] = "user"; $("src-" + key).textContent = "user"; });
   $("btn-run").onclick = run; $("btn-cancel").onclick = () => api("/api/cancel", {}).then(() => toast("Cancelling…"));

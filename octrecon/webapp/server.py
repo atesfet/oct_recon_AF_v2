@@ -261,6 +261,137 @@ def api_estimate_focus(body):
     return res
 
 
+# --------------------------------------------------------------------------- interactive tools
+_TOOL_LOCK = threading.Lock()
+_VI_CACHE: dict = {}
+_DT_CACHE: dict = {}
+_FT_CACHE: dict = {}
+
+
+def _vi(volume):
+    from ..estimation.interactive import VolumeInfo, resolve_volume
+    key = str(resolve_volume(volume))
+    with _TOOL_LOCK:
+        if key not in _VI_CACHE:
+            _VI_CACHE.clear(); _DT_CACHE.clear(); _FT_CACHE.clear()
+            _VI_CACHE[key] = VolumeInfo(key)
+        return _VI_CACHE[key]
+
+
+def api_tiles(body):
+    return _vi(body["volume_folder"]).summary()
+
+
+def _dispersion_tool(body):
+    from ..estimation.interactive import DispersionTool
+    vi = _vi(body["volume_folder"])
+    folder = body["folder"]
+    if folder not in vi.by_folder:
+        raise ValueError(f"unknown tile folder {folder}")
+    frame = int(body.get("frame", 1))
+    if not 1 <= frame <= vi.hdr.size_y:
+        raise ValueError(f"B-scan must be 1..{vi.hdr.size_y}")
+    key = (folder, frame, bool(body.get("legacy_axis", False)))
+    with _TOOL_LOCK:
+        dt = _DT_CACHE.get(key)
+    if dt is None:
+        dt = DispersionTool(vi, folder, frame - 1, legacy_axis=key[2])
+        with _TOOL_LOCK:
+            if len(_DT_CACHE) > 8:
+                _DT_CACHE.clear()
+            _DT_CACHE[key] = dt
+    return vi, dt
+
+
+def api_dispersion_render(body):
+    """Demo_DispersionCorrectionManual: ln|scan| with caxis [-5 6] for one slider value."""
+    from ..estimation.interactive import DISPERSION_CLIM, beta_to_slider, gray_png, slider_to_beta
+    vi, dt = _dispersion_tool(body)
+    if body.get("beta") is not None:
+        beta = float(body["beta"]); slider = beta_to_slider(beta)
+    else:
+        slider = float(body.get("slider", 2.0)); beta = slider_to_beta(slider)
+    lg = dt.ln_image(beta)
+    t = vi.by_folder[dt.folder]
+    return {"png": gray_png(lg, *DISPERSION_CLIM), "beta": beta, "slider": slider, "shape": list(lg.shape),
+            "sharpness": dt.sharpness(lg), "folder": dt.folder, "frame": dt.frame0 + 1,
+            "tile": {"xi": t.xi, "yi": t.yi, "zi": t.zi, "x_mm": t.x_center_mm, "y_mm": t.y_center_mm,
+                     "z_mm": t.z_depth_mm}, "system_used": dt.system_used}
+
+
+def _focus_tool(volume):
+    from ..estimation.interactive import FocusTool
+    vi = _vi(volume)
+    with _TOOL_LOCK:
+        ft = _FT_CACHE.get("ft")
+        if ft is None:
+            ft = _FT_CACHE["ft"] = FocusTool(vi)
+    return ft
+
+
+def api_focus_setup(body):
+    ft = _focus_tool(body["volume_folder"])
+    s = ft.setup()
+    s["folders"] = {f"{d['zi']},{xi}": ft.folder_for(d["zi"], xi)
+                    for d in s["depths"] for xi in range(len(s["x_centers_mm"]))}
+    return s
+
+
+def api_focus_bscan(body):
+    """yOCTMeasureFocusDrift renderTileBScan: dB image (float32) + 5/99.8 % base range."""
+    from ..estimation.interactive import matlab_prctile
+    from ..params import resolve_dispersion
+    ft = _focus_tool(body["volume_folder"])
+    zi, xi = int(body["zi"]), int(body["xi"])
+    folder = ft.folder_for(zi, xi)
+    fallback = False
+    if folder is None:                       # legacy: fall back to the central X tile
+        folder, xi, fallback = ft.folder_for(zi, ft.xi0), ft.xi0, True
+        if folder is None:
+            raise ValueError(f"No tile found for zDepth index {zi}")
+    beta = body.get("dispersion_quadratic_term")
+    beta = float(beta) if beta not in (None, "", "auto") else resolve_dispersion(ft.vi.si)[0]
+    frame = max(1, min(ft.n_frames, int(body.get("frame", ft.frame_center))))
+    img = ft.bscan_db(folder, frame, beta).astype(np.float32)
+    lo, hi = matlab_prctile(img, [5, 99.8])
+    if hi <= lo:
+        hi = lo + 1
+    return {"data_f32": base64.b64encode(np.ascontiguousarray(img).tobytes()).decode(), "shape": list(img.shape),
+            "base_lo": float(lo), "base_hi": float(hi), "folder": folder, "xi": xi, "frame": frame,
+            "fallback": fallback, "dispersion": beta}
+
+
+def api_focus_fit(body):
+    from ..estimation.interactive import drift_readout
+    ft = _focus_tool(body["volume_folder"])
+    z, pix = body.get("z_stage_mm", []), body.get("focus_pix", [])
+    out = {"pred_pix": None, "readout": f"Clicked points: {len(pix)}\n(need >= 2 for slope)"}
+    if len(pix) == 0:
+        out["readout"] = "Drift so far: need >= 2 clicked points"
+        return out
+    try:
+        q = body.get("z_query_mm")
+        if q is not None:
+            p, _ = ft.fit(z, pix, [float(q)])
+            out["pred_pix"] = float(p[0])
+        if len(pix) >= 2:
+            _, d = ft.fit(z, pix, [0.0])
+            out["readout"] = drift_readout(d, len(pix))
+            out["diagnostics"] = d
+    except Exception:
+        if len(pix) >= 2:
+            out["readout"] = f"Clicked points: {len(pix)}\n(no usable clicks for slope yet)"
+    return out
+
+
+def api_focus_finish(body):
+    from ..estimation.interactive import finish_focus
+    ft = _focus_tool(body["volume_folder"])
+    out_dir = body.get("out_dir") or str(ft.vi.volume)
+    res = finish_focus(ft, body.get("measurements", []), Path(out_dir), bool(body.get("also_volume", False)))
+    return res
+
+
 def api_preview(body):
     from ..estimation import preview
     r = preview.preview_bscan(body["volume_folder"], int(body.get("zi", 0)),
@@ -336,6 +467,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, api_estimate_dispersion(body))
             if u.path == "/api/estimate/focus":
                 return self._send(200, api_estimate_focus(body))
+            if u.path == "/api/tiles":
+                return self._send(200, api_tiles(body))
+            if u.path == "/api/dispersion/render":
+                return self._send(200, api_dispersion_render(body))
+            if u.path == "/api/focus/setup":
+                return self._send(200, api_focus_setup(body))
+            if u.path == "/api/focus/bscan":
+                return self._send(200, api_focus_bscan(body))
+            if u.path == "/api/focus/fit":
+                return self._send(200, api_focus_fit(body))
+            if u.path == "/api/focus/finish":
+                return self._send(200, api_focus_finish(body))
             if u.path == "/api/preview":
                 return self._send(200, api_preview(body))
             if u.path == "/api/run":
