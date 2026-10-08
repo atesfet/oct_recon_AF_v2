@@ -74,6 +74,18 @@ Per tile and batch of B-scans (complex scans, before the magnitude):
    decorrelation of the lag product by field curvature). Pure film: E_f ≈ |c|², removed as before. Tissue: E_f ≈ 0,
    left in place. Mixed: only the film's share is removed.
 
+7. **No line artefacts: the amount removed is smooth in x and y.** Steps 2–6 are evaluated per
+   B-scan; decided independently, neighbouring B-scans (2 µm apart) received slightly different
+   removal over runs of A-lines, which showed as thin horizontal "scraped" lines in en-face images
+   (v1 has none). The film is a smooth surface, so: the film position, the weight and the film
+   energy are smoothed across `fep_y_smooth` = 5 B-scans; the coherence products are demodulated
+   for the phase rotation that the field curvature imposes on the film (phase −2π·c·m for depth m,
+   c = k₀/(NΔk) ≈ 4.72, with the known optical-path shift per A-line); and the removed amplitude
+   `|g c|` is median-filtered over 5 B-scans × 31 A-lines and Gaussian-smoothed — each A-line then
+   loses that smooth amount along its own `c`. Real data (row 4, 200 B-scans; energy of short
+   horizontal dashes relative to the image): v1 −14.2 dB, per-B-scan removal −9.8 dB, final −13.0 dB,
+   with the film in empty tiles still removed to +1.9/+2.4 dB above the background.
+
 Everything outside the ±R window (+ search range) is bit-identical to the input; inside it only
 the `rank` PSF components are changed. Heavy work runs on the selected device (CuPy / PyTorch);
 only small (B, nX) arrays go to the host.
@@ -148,6 +160,7 @@ mask + projections, removed-signal volume).
 | `fep_keep_level` | 0.7 | background energy kept along the basis (0 = remove all) |
 | `fep_coherence_limit` | `True` | cap the removal at the laterally coherent film energy (step 6; protects tissue) |
 | `fep_coh_lag`, `fep_coh_window`, `fep_coh_margin` | 4, 31, 1.0 | lag (A-lines), averaging window (A-lines), allowed excess |
+| `fep_y_smooth` | 5 | B-scans over which position, weight, film energy and removed amount are smoothed (step 7) |
 | `fep_bg_mode` | `both` | background power for step 5: `both` sides, brighter side (`max`), or `inside` the window |
 | `fep_rank` | 3 | PSF basis size |
 | `fep_half_window` | 8 | R, samples on each side of the surface |
