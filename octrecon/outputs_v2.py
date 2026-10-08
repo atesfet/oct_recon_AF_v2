@@ -26,6 +26,24 @@ def _clim(img, lo=1.0, hi=99.7):
     return float(a), float(b) if b > a else float(a) + 1.0
 
 
+def cfg_enh_sigma(px_um: float, scale_um: float = 80.0) -> float:
+    return max(2.0, scale_um / px_um)
+
+
+def local_contrast(img_db: np.ndarray, sigma_px: float) -> np.ndarray:
+    """Display-only local contrast normalisation of a dB image (NaN = no tissue): subtract the local
+    mean and divide by the local standard deviation, both NaN-aware Gaussian (normalised convolution)
+    over sigma_px. Features become equally visible in bright and dim regions; values are z-scores."""
+    from scipy.ndimage import gaussian_filter
+    ok = np.isfinite(img_db)
+    v = np.where(ok, img_db, 0.0).astype(np.float32)
+    w = gaussian_filter(ok.astype(np.float32), sigma_px)
+    mu = gaussian_filter(v, sigma_px) / np.maximum(w, 1e-6)
+    var = gaussian_filter(np.where(ok, (v - mu) ** 2, 0.0).astype(np.float32), sigma_px) / np.maximum(w, 1e-6)
+    out = (v - mu) / np.sqrt(np.maximum(var, 1e-6))
+    return np.where(ok, out, np.nan).astype(np.float32)
+
+
 def write_png(path: Path, img: np.ndarray, clim=None, cmap="gray", px_um: float | None = None, text: dict | None = None):
     """8-bit preview; with px_um the physical pixel size is stored (PNG pHYs, pixels per metre)."""
     import matplotlib
@@ -59,7 +77,7 @@ def _overview(path, name, proj, rm_proj, vol, vol_rm, md, clim):
     st = max(1, int(np.ceil(max(vol.shape[0], vol.shape[2]) / 2500)))
     panels = []
     if proj is not None:
-        panels.append(("xy projection (tissue only, mean amplitude)", proj, "gray"))
+        panels.append(("xy projection (tissue only, strongest layer per pixel)", proj, "gray"))
     if rm_proj is not None:
         panels.append(("removed FEP signal, xy projection (mean over z)", rm_proj, "magma"))
     nb = 2 if vol_rm is not None else 1
@@ -114,16 +132,21 @@ def write_v2_outputs(rec, out_dir: Path, name: str, vol, vol_rm, clim, rm_clims,
                 mx[a:a + 256] = np.where(np.isfinite(c).any(1), np.nanmax(np.where(np.isfinite(c), c, -np.inf), 1), np.nan)
             P = {"mean": m, "max": mx}
             info = {"mode": "all z", "fep_removal": rec.fep is not None}
-        proj = P["mean"]
+        proj = P.get("topk", P["mean"])
         files = {}
-        for key in ("mean", "max"):
+        for key in [k for k in ("topk", "mean", "max") if k in P]:
             tif = out_dir / f"{name}_xy_{key}.tif"
             write_2d_tiff(tif, P[key], md, acq, dict(info, projection=key, value_unit="dB", nan="no tissue",
-                                                     definition=("20 log10 mean amplitude over the tissue slab" if key == "mean"
-                                                                 else "max dB over the tissue slab")))
+                                                     definition={"mean": "20 log10 mean amplitude over the tissue slab",
+                                                                 "max": "max dB over the tissue slab",
+                                                                 "topk": "20 log10 mean of the k strongest background-subtracted slices of the tissue slab"}[key]))
             lo, hi = write_png(out_dir / f"{name}_xy_{key}.png", P[key], px_um=px,
                                text={"pixel_size_um": px, "value": f"dB {key} projection, display {P[key].dtype}"})
             files[key] = {"tif": str(tif), "png": str(out_dir / f"{name}_xy_{key}.png"), "png_clim_dB": [lo, hi]}
+            enh = out_dir / f"{name}_xy_{key}_enhanced.png"
+            write_png(enh, local_contrast(P[key], cfg_enh_sigma(px)), clim=(-2.5, 2.5), px_um=px,
+                      text={"pixel_size_um": px, "display": "local contrast normalised (display only, not quantitative)"})
+            files[key]["png_enhanced"] = str(enh)
         if "thickness_um" in P:
             tif = out_dir / f"{name}_tissue_thickness_um.tif"
             write_2d_tiff(tif, P["thickness_um"], md, acq, {"value_unit": "um", "definition": "tissue slab thickness", "zero": "no tissue"})

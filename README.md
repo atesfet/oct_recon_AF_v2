@@ -7,7 +7,9 @@
 > (legacy-identical) output. Details and results: [`docs/07_fep_removal.md`](docs/07_fep_removal.md).
 > The removed signal is saved too (volume, xy projection, overview figure) so it can be inspected.
 > v2 also saves a **tissue-only xy (en-face) projection** — one 2D image of the tissue
-> ([`docs/08_xy_projection.md`](docs/08_xy_projection.md)). `--v1` switches both off.
+> ([`docs/08_xy_projection.md`](docs/08_xy_projection.md)), and corrects the **tile seams** (the brightness
+> falloff towards the patch edges, flat-field; [`docs/09_tile_flatfield.md`](docs/09_tile_flatfield.md)).
+> `--v1` switches all three off.
 > Speed figures below are for v1. Full volume on the GPU, same day and disk: v1 19.6 min vs v2
 > 21.0 min reconstruction (+7.3 %, largely hidden behind the disk I/O) + ≈ 2 min for the v2 outputs.
 > The removal protects the tissue with a lateral-coherence cap (only the film's coherent share is removed).
@@ -227,6 +229,8 @@ records the resolved value **and its source** in `<name>_config.json`.
 | `delete_archives_after_extract` | `false` | The legacy default is `true`. |
 | `fep_removal` | `true` | **v2.** Remove the FEP-film specular reflections (`docs/07_fep_removal.md`). `false` = legacy-identical output. |
 | `fep_save_removed` | `true` | **v2.** Also save the removed FEP signal (volume, projection, overview figure). |
+| `flatfield_correction` | `true` | **v2.** Tile seam (vignetting) correction, doc 09. `flatfield_smooth_px` 8, `flatfield_max_gain_db` 24. |
+| `fep_y_smooth` | 5 | **v2.** B-scans over which the film position / weight / energy are smoothed (no line artefacts). |
 | `xy_projection` | `true` | **v2.** Save the xy (en-face) projection. `false` together with `fep_removal=false` = v1 output. |
 | `xy_projection_tissue_only` | `true` | **v2.** Project only over the automatically segmented tissue slab (`false`: all z). |
 | `tissue_smooth_um`, `tissue_threshold_db`, `tissue_max_hole_mm2`, `tissue_min_area_mm2` | 30, `auto` (Otsu), 0.5, 0.005 | **v2.** Tissue mask (`docs/08_xy_projection.md`). |
@@ -270,6 +274,8 @@ its β).
 | `<name>_fep_removed.tiff` (+ `.json`) | **v2.** The removed (subtracted) FEP signal as a volume, same grid / format as `<name>.tiff`. |
 | `<name>_fep_removed_xy.tif` (+ `.png`) | **v2.** Its xy projection (mean over all z). |
 | `<name>_fep_overview.png` | **v2.** Tissue projection, removed-signal projection and a B-scan of both at a glance. |
+| `<name>_xy_mean_enhanced.png` / `_xy_max_enhanced.png` | **v2.** Display-only preview with local contrast normalisation (80 µm): features equally visible in bright and dim regions. Not quantitative. |
+| `<name>_flatfield_gain_dB.tif` | **v2.** Tile flat-field gain per output depth and position in the patch (doc 09). |
 
 **TIFF calibration and metadata.** The voxel size is measured from the output axes (not
 assumed) and written the way legacy `yOCT2Tif` does, so Fiji/ImageJ shows real units:
@@ -303,7 +309,9 @@ python -m octrecon reconstruct /data/sample/OCTVolume --output-root /data/recon 
 python -m octrecon reconstruct /data/sample/OCTVolume --config my_config.json --rows 4
 python -m octrecon reconstruct /data/sample/OCTVolume --no-fep                # no FEP removal
 python -m octrecon reconstruct /data/sample/OCTVolume --no-projection         # no xy projection
-python -m octrecon reconstruct /data/sample/OCTVolume --v1                    # v1 / legacy-identical (= --no-fep --no-projection)
+python -m octrecon reconstruct /data/sample/OCTVolume --no-flatfield          # no tile seam correction
+python -m octrecon reconstruct /data/sample/OCTVolume --v1                    # v1 / legacy-identical (= --no-fep --no-projection --no-flatfield)
+python -m octrecon flatfield /data/recon/sample_recon                         # apply the seam correction to a kept float volume
 python -m octrecon project /data/recon/sample_recon --max-hole-mm2 0.5        # redo the tissue-only xy projection (needs keep_float_volume)
 python -m octrecon reconstruct /data/sample/OCTVolume --set fep_keep_level=0.5
 python -m octrecon reconstruct /data/sample/OCTVolume --set dispersion_quadratic_term=8.9e7 focus_positions=433
@@ -352,6 +360,7 @@ Details, benchmarks and validation are in `docs/oct_recon_AF_v1.pdf` and `docs/0
 | `docs/06_input_formats.md` | Supported raw formats and their validation against MATLAB. |
 | `docs/07_fep_removal.md` | **v2:** FEP-film reflection removal — method, parameters, results, limitations. |
 | `docs/08_xy_projection.md` | **v2:** tissue-only xy projection — tissue mask, slab, projection definitions. |
+| `docs/09_tile_flatfield.md` | **v2:** tile seam (flat-field) correction — cause, method, results. |
 | `docs/oct_recon_AF_v1.pdf` | Technical report: acceleration analysis, benchmarks, validation. |
 
 ---

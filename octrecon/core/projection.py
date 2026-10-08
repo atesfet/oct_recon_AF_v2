@@ -14,6 +14,9 @@ memory-mapped volume larger than RAM):
    removed; the top / bottom tissue surfaces (first / last masked voxel) are smoothed laterally
    and interpolated into the filled holes -> a tissue slab [top, bottom] per column;
 4. projections over the slab (only finite voxels):
+       topk :  P(x,y) = 20 log10( mean of the k (5) largest  max(10^(I/20) - N(z), 0)  over the slab )
+               per-pixel depth selection of the strongest tissue layer, background-subtracted
+               (N(z): noise floor of the columns without tissue)
        mean :  P(x,y) = 20 log10( mean_{z in slab} 10^(I/20) )   (mean amplitude, like the stitching)
        max  :  P(x,y) = max_{z in slab} I
    plus the tissue thickness map (um) and the slab surfaces.
@@ -71,7 +74,8 @@ def _components_area(mask):
 
 def tissue_projection(vol, px_um: float, dz_um: float, smooth_um: float = 30.0, threshold_db="auto",
                       min_voxels: int = 2, max_hole_mm2: float = 0.5, min_area_mm2: float = 0.005,
-                      surface_smooth_um: float = 50.0, chunk: int = 256, log=print, progress=None) -> dict:
+                      surface_smooth_um: float = 50.0, topk: int = 5, chunk: int = 256, log=print,
+                      progress=None) -> dict:
     """vol: (y, z, x) float32 dB (NaN = no data), ndarray or memmap. px_um: lateral pixel (um).
     Returns dict of 2D float32 arrays (y, x): mean, max (dB, NaN outside tissue), thickness_um,
     top_um / bottom_um (slab surfaces, um below the first z plane), footprint (bool), + info."""
@@ -96,9 +100,17 @@ def tissue_projection(vol, px_um: float, dz_um: float, smooth_um: float = 30.0, 
     count = np.zeros((ny, nx), np.int16)
     top = np.full((ny, nx), -1, np.int16)
     bot = np.full((ny, nx), -1, np.int16)
+    nf_samples = [[] for _ in range(nz)]
     for k, (a, b, pa, pb) in enumerate(_chunks(ny, chunk, pad)):
-        m = _smooth_db(np.asarray(vol[pa:pb]), size)[a - pa:b - pa] > thr
+        raw = np.asarray(vol[pa:pb])
+        m = _smooth_db(raw, size)[a - pa:b - pa] > thr
         anym = m.any(1)
+        out_cols = ~anym[::4, ::4]                                 # columns without tissue: noise floor
+        sub = raw[a - pa:b - pa][::4, :, ::4]
+        if out_cols.any():
+            for z in range(nz):
+                v = sub[:, z, :][out_cols]
+                nf_samples[z].append(v[np.isfinite(v)])
         count[a:b] = m.sum(1)
         top[a:b] = np.where(anym, np.argmax(m, 1), -1)
         bot[a:b] = np.where(anym, nz - 1 - np.argmax(m[:, ::-1], 1), -1)
@@ -121,7 +133,13 @@ def tissue_projection(vol, px_um: float, dz_um: float, smooth_um: float = 30.0, 
     b_s = _fill_nan_smooth(bot.astype(np.float32), measured, ssz)
     t_i = np.where(fp, np.floor(np.nan_to_num(t_s, nan=0)), 0).astype(np.int16)
     b_i = np.where(fp, np.ceil(np.nan_to_num(b_s, nan=-1)), -1).astype(np.int16)
+    nf_db = np.array([np.median(np.concatenate(v)) if v and sum(len(x) for x in v) else np.nan for v in nf_samples])
+    if not np.isfinite(nf_db).any():
+        nf_db = np.full(nz, -np.inf)
+    nf_db = np.where(np.isfinite(nf_db), nf_db, np.nanmin(nf_db[np.isfinite(nf_db)]) if np.isfinite(nf_db).any() else -np.inf)
+    nf_amp = np.power(10.0, nf_db / 20.0).astype(np.float32)[None, :, None]
     # ---- pass 3: projections over the slab
+    ptop = np.full((ny, nx), np.nan, np.float32)
     pmean = np.full((ny, nx), np.nan, np.float32)
     pmax = np.full((ny, nx), np.nan, np.float32)
     zz = np.arange(nz)[None, :, None]
@@ -133,6 +151,12 @@ def tissue_projection(vol, px_um: float, dz_um: float, smooth_um: float = 30.0, 
         with np.errstate(divide="ignore", invalid="ignore"):
             pmean[a:b] = np.where(n_in > 0, 20 * np.log10(amp.sum(1) / np.maximum(n_in, 1)), np.nan)
         pmax[a:b] = np.where(n_in > 0, np.max(np.where(inside, c, -np.inf), 1), np.nan)
+        # per-pixel depth selection: mean of the k strongest background-subtracted slices of the slab
+        sig = np.where(inside, np.maximum(amp - nf_amp, 0), 0).astype(np.float32)
+        kk = min(topk, nz)
+        top_k = -np.partition(-sig, kk - 1, axis=1)[:, :kk, :]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ptop[a:b] = np.where(n_in > 0, 20 * np.log10(np.maximum(top_k.sum(1) / np.maximum(np.minimum(n_in, kk), 1), 1e-6)), np.nan)
         if progress:
             progress(stage="projection", done=2 * nchunks + k + 1, total=3 * nchunks)
     thick = np.where(fp, (b_i - t_i + 1) * dz_um, 0).astype(np.float32)
@@ -141,7 +165,9 @@ def tissue_projection(vol, px_um: float, dz_um: float, smooth_um: float = 30.0, 
             "median_thickness_um": float(np.median(thick[fp])) if fp.any() else 0.0}
     log(f"tissue footprint {100 * info['footprint_fraction']:.1f}% of the field, median slab "
         f"{info['median_thickness_um']:.1f} um")
-    return {"mean": pmean, "max": pmax, "thickness_um": thick,
+    info["topk"] = int(topk)
+    info["noise_floor_db"] = [float(v) for v in nf_db]
+    return {"topk": ptop, "mean": pmean, "max": pmax, "thickness_um": thick,
             "top_um": np.where(fp, t_i * dz_um, np.nan).astype(np.float32),
             "bottom_um": np.where(fp, b_i * dz_um, np.nan).astype(np.float32),
             "footprint": fp, "info": info}

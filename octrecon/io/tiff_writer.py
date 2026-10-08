@@ -157,7 +157,7 @@ def retag_tiff(src: str | Path, dst: str | Path | None = None, acquisition: dict
 
 
 def write_2d_calibrated(path: str | Path, img: np.ndarray, metadata: dict, acquisition: dict | None = None,
-                        info: dict | None = None):
+                        info: dict | None = None, display_range: tuple | None = "auto"):
     """Calibrated float32 2D image (y rows, x columns), e.g. an en-face projection.
 
     Pixel size from the output axes (x: columns, y: rows), written as standard TIFF resolution in
@@ -177,6 +177,12 @@ def write_2d_calibrated(path: str | Path, img: np.ndarray, metadata: dict, acqui
     if acquisition:
         meta["acquisition"] = acquisition
     desc = "ImageJ=1.53\nimages=1\nunit=micron\n"
+    if display_range == "auto":                     # contrast Fiji opens with: 1st-99.5th pct of the data
+        fin = img[np.isfinite(img)]
+        display_range = (float(np.percentile(fin, 1)), float(np.percentile(fin, 99.5))) if fin.size else None
+    if display_range:
+        desc += f"min={display_range[0]:.6g}\nmax={display_range[1]:.6g}\n"
+        meta["display_range"] = list(display_range)
     fields = [("oct_pixel_x_um", dx), ("oct_pixel_y_um", dy), ("oct_axes", "rows_y_columns_x"),
               ("oct_x0_mm", float(x[0])), ("oct_y0_mm", float(y[0]))]
     fields += [(f"oct_{k}", val) for k, val in info.items() if isinstance(val, (int, float, str))]

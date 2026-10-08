@@ -18,9 +18,13 @@ output is identical to v1.
 | `<name>_xy_max.tif` | maximum-intensity projection over the tissue slab |
 | `<name>_xy_mean.png`, `_xy_max.png` | 8-bit previews (1st–99.7th percentile) |
 | `<name>_tissue_thickness_um.tif` (+ `.png`) | thickness of the slab used per column (µm, 0 = no tissue) |
+| `<name>_xy_mean_enhanced.png`, `_xy_max_enhanced.png` | display-only preview, local contrast normalisation: (dB − local mean) / local SD, Gaussian σ = 80 µm, window ±2.5 |
 
-The TIFFs are calibrated (ImageJ: µm per pixel = output x/y pixel size); the description holds
-the mask threshold and settings. The run summary has them under `xy_projection`.
+The TIFFs are calibrated: standard TIFF resolution in pixels/cm (x and y each from their own output
+axis, read by any TIFF reader) and ImageJ `unit=micron`; the description holds the acquisition
+(patches, system, probe), what the values mean (dB, NaN = no tissue), the position of the first
+pixel (mm) and a display range (1st–99.5th percentile) so that Fiji opens the image with a good
+contrast; everything is also in a `.json` sidecar. PNG previews carry the physical pixel size. The run summary has them under `xy_projection`.
 
 Re-run only the projection (e.g. with other mask settings) from a reconstruction that kept its
 float volume (`keep_float_volume=true`), without reconstructing again:

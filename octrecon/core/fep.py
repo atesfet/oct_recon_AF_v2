@@ -59,6 +59,10 @@ class FEPConfig:
     coh_window: int = 31          # A-lines averaged for the coherent film-energy estimate
     coh_margin: float = 1.0       # allowed excess over the estimate (film amplitude jitter)
     use_specular_weight: bool = True  # keep the specular-likeness decision weight w
+    y_smooth: int = 5             # B-scans: the film is smooth in y too; position, weight and film
+                                  # energy are smoothed across neighbouring B-scans (no line artefacts)
+    smooth_amount: bool = True    # the removed amplitude is a smooth 2-D field (no line artefacts)
+    amount_window: int = 31       # A-lines (x) of the median for the removed amplitude
     learn_basis: bool = True      # learn the PSF basis from the scan (else theoretical)
 
 
@@ -148,13 +152,22 @@ class FEPRemover:
     shift / pdz: optical-path correction maps (nY, nX) (OpticalPathCorrection.shift), used to
     convert flattened rows to native rows per A-line."""
 
-    def __init__(self, U: np.ndarray, shift: np.ndarray, cfg: FEPConfig, xp=np):
+    def __init__(self, U: np.ndarray, shift: np.ndarray, cfg: FEPConfig, xp=np, pdz: np.ndarray | None = None,
+                 carrier: float | None = None):
         self.cfg = cfg
         self.xp = xp
         self.U = U.astype(np.complex64)
         self.shift = np.asarray(shift, np.int64)
+        # fractional film depth per A-line (rows) and carrier (rad per row / 2 pi): the film phase at
+        # depth m is -2 pi carrier m, so the field curvature rotates the film phase along x; it is removed
+        # from the coherence products before averaging (else the average cancels for real film)
+        self.pdz = None if pdz is None else np.asarray(pdz, np.float64)
+        self.carrier = carrier
+        self._coh_sign = None
         self.R = cfg.half_window
         self.stats = {"batches": 0, "surfaces": 0, "removed_energy_db": []}
+        self.keep_debug = False          # diagnostics: per-A-line factors of the batch (self.last)
+        self.last = {}
 
     def _background_power(self, wxp, work, pk, bidx_off, bg, es, ec, n_win, rank):
         """Per-sample power of the signal *under* the reflection (tissue or noise) that the
@@ -169,7 +182,7 @@ class FEPRemover:
             return wxp.maximum(wxp.mean(p[..., :bg], axis=-1), wxp.mean(p[..., bg:], axis=-1))
         return wxp.mean(p, axis=-1)
 
-    def _coherence_gain(self, wxp, work, idx, ec, B, nX, nZ):
+    def _coherence_gain(self, wxp, work, idx, ec, B, nX, nZ, frames=None):
         """Cap the subtracted energy at the film energy, estimated from the lateral coherence:
         E_f(x) = | mean_{x' in window} <s(x'), s(x'+L)> |, where both segments are taken on the
         rows of A-line x'. The film is a continuous mirror, so its products add up coherently;
@@ -185,11 +198,28 @@ class FEPRemover:
         seg_l = work_flat[wxp.asarray(flat.reshape(-1))].reshape(seg.shape)
         prod = _np(wxp, wxp.sum(seg * wxp.conj(seg_l), axis=-1))          # (B, nX) complex, host
         from scipy.ndimage import uniform_filter1d
+        if self.pdz is not None and self.carrier and frames is not None:
+            pd = self.pdz[np.asarray(frames)]                                # (B, nX) rows
+            ph = 2 * np.pi * self.carrier * (pd[:, xl] - pd)
+            if self._coh_sign is None:                                      # sign convention: from the data, once
+                def coh(sgn):
+                    q = prod * np.exp(1j * sgn * ph)
+                    mm = uniform_filter1d(q.real, cfg.coh_window, axis=-1) + 1j * uniform_filter1d(q.imag, cfg.coh_window, axis=-1)
+                    return float(np.sum(np.abs(mm)))
+                cp, cm, c0 = coh(1), coh(-1), coh(0)
+                if max(cp, cm) > 1.05 * c0:
+                    self._coh_sign = 1 if cp >= cm else -1
+                self.stats['coh_demod'] = {'plus': cp, 'minus': cm, 'none': c0}
+            if self._coh_sign is not None:
+                prod = prod * np.exp(1j * self._coh_sign * ph)
         m = (uniform_filter1d(prod.real, cfg.coh_window, axis=-1, mode="nearest")
              + 1j * uniform_filter1d(prod.imag, cfg.coh_window, axis=-1, mode="nearest"))
         # remove the bias of incoherent (tissue) products: E|mean|^2 = mean|q|^2 / n for random phases
         v = uniform_filter1d(np.abs(prod) ** 2, cfg.coh_window, axis=-1, mode="nearest") / cfg.coh_window
-        ef = np.sqrt(np.maximum(np.abs(m) ** 2 - v, 0.0))
+        ef2 = np.abs(m) ** 2 - v                       # unbiased per B-scan (may be < 0 for tissue)
+        if cfg.y_smooth > 1 and B > 1:                 # average across neighbouring B-scans, then clip
+            ef2 = uniform_filter1d(ef2, min(cfg.y_smooth, B), axis=0, mode="nearest")
+        ef = np.sqrt(np.maximum(ef2, 0.0))
         ec_h = np.maximum(_np(wxp, ec), 1e-30)
         g = np.minimum(1.0, (1.0 + cfg.coh_margin) * np.sqrt(ef / ec_h)).astype(np.float32)
         self.stats.setdefault("coh_gain_median", []).append(float(np.median(g)))
@@ -231,7 +261,8 @@ class FEPRemover:
             cmag = wxp.abs(wxp.take_along_axis(work, wxp.asarray(cand), axis=-1))
             am = _np(wxp, wxp.argmax(cmag, axis=-1))
             pk = np.take_along_axis(cand, am[..., None], -1)[..., 0]
-            pk = median_filter(pk.astype(float), size=(1, cfg.lateral_median), mode="nearest").round().astype(np.int64)
+            ysz = min(max(int(cfg.y_smooth), 1), B)
+            pk = median_filter(pk.astype(float), size=(ysz, cfg.lateral_median), mode="nearest").round().astype(np.int64)
             pk = np.clip(pk, lo_lim, hi_lim)
             idx = pk[..., None] + k                                  # (B, nX, 2R+1)
             idx_d = wxp.asarray(idx)
@@ -240,17 +271,34 @@ class FEPRemover:
             ec = wxp.sum(wxp.abs(c) ** 2, axis=-1)
             es = wxp.sum(wxp.abs(seg) ** 2, axis=-1) + 1e-30
             frac = _np(wxp, ec / es)
-            fmed = median_filter(frac, size=(1, cfg.lateral_median), mode="nearest")
+            fmed = median_filter(frac, size=(ysz, cfg.lateral_median), mode="nearest")
             w = np.clip((fmed - cfg.frac_lo) / (cfg.frac_hi - cfg.frac_lo), 0, 1).astype(np.float32)
             if not cfg.use_specular_weight:
                 w = np.ones_like(w)
             gain = wxp.asarray(w)
+            dbg = {"pk": pk, "w": w, "ec": _np(wxp, ec)}
             if cfg.coherence_limit:
-                gain = gain * self._coherence_gain(wxp, work, idx, ec, B, nX, nZ)
+                gc = self._coherence_gain(wxp, work, idx, ec, B, nX, nZ, frames)
+                gain = gain * gc
+                dbg["g_coh"] = _np(wxp, gc)
             if cfg.shrink:
                 bpow = self._background_power(wxp, work, pk, bidx_off, bg, es, ec, 2 * R + 1, U.shape[1])
                 keep = cfg.keep_level * U.shape[1] * bpow                # expected background energy in the subspace
-                gain = gain * wxp.maximum(0.0, 1.0 - wxp.sqrt(keep / wxp.maximum(ec, 1e-30))).astype(np.float32)
+                gl = wxp.maximum(0.0, 1.0 - wxp.sqrt(keep / wxp.maximum(ec, 1e-30))).astype(np.float32)
+                gain = gain * gl
+                dbg["g_level"] = _np(wxp, gl)
+            if cfg.smooth_amount:
+                # the amount removed must be smooth in x and y (the film is): the removed amplitude
+                # |g c| is median-filtered over (y_smooth B-scans x amount_window A-lines) and
+                # Gaussian-smoothed; each A-line then loses that amount along its own c direction
+                ech = np.maximum(_np(wxp, ec), 1e-30)
+                amt = _np(wxp, gain) * np.sqrt(ech)
+                amt = median_filter(amt, size=(ysz, cfg.amount_window), mode="nearest")
+                from scipy.ndimage import gaussian_filter
+                amt = gaussian_filter(amt, sigma=(ysz / 3.0, cfg.amount_window / 6.0), mode="nearest")
+                gain = wxp.asarray(np.minimum(1.0, amt / np.sqrt(ech)).astype(np.float32))
+            dbg["gain"] = _np(wxp, gain)
+            self.last.setdefault(r, dbg) if self.keep_debug else None
             delta = gain[..., None] * (c @ U.T)                      # (B, nX, 2R+1)
             flat_idx = (wxp.arange(B)[:, None, None] * nX + wxp.arange(nX)[None, :, None]) * nZ + idx_d
             work = work.reshape(-1)

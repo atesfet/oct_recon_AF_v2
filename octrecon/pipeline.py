@@ -106,6 +106,7 @@ class ReconConfig:
     fep_coh_window: int = 31
     fep_coh_margin: float = 1.0
     fep_bg_mode: str = "both"                  # both | max | inside
+    fep_y_smooth: int = 5                      # B-scans averaged for the removal (avoids line artefacts)
     fep_learn_basis: bool = True
     fep_basis_file: str | None = None          # .npy (2R+1, rank) complex; overrides learning
     fep_save_removed: bool = True              # also save the removed (subtracted) signal volume + projection
@@ -262,6 +263,20 @@ class Reconstructor:
             r = self._readers[folder] = TileReader(self.volume / folder)
         return r
 
+    def _fep_pdz(self):
+        """Fractional optical-path depth shift (rows) per (frame, A-line), or None."""
+        if self.oc is None:
+            return None
+        return np.repeat(np.asarray(self.oc.pdz, np.float64), max(1, self.hdr.ascan_avg), axis=1)
+
+    def _carrier(self):
+        """Film phase per depth row / 2 pi: a reflector at depth m has phase -2 pi c m with
+        c = k_0 / (N dk) for the equispaced k grid of the spectral processing."""
+        k = 2 * np.pi / np.asarray(self.sg.lambda_eq_nm, np.float64)
+        n = len(k)
+        dk = abs(k[0] - k[-1]) / (n - 1)
+        return float(max(k[0], k[-1]) / (n * dk))
+
     def _fep_shift(self):
         """Optical-path row shift per (frame, A-line); A-scan repeats share their position."""
         h = self.hdr
@@ -286,7 +301,8 @@ class Reconstructor:
                        detect_min_db=cfg.fep_detect_min_db, max_surfaces=cfg.fep_max_surfaces,
                        shrink=cfg.fep_shrink, keep_level=cfg.fep_keep_level, learn_basis=cfg.fep_learn_basis,
                        bg_mode=cfg.fep_bg_mode, coherence_limit=cfg.fep_coherence_limit, coh_lag=cfg.fep_coh_lag,
-                       coh_window=cfg.fep_coh_window, coh_margin=cfg.fep_coh_margin)
+                       coh_window=cfg.fep_coh_window, coh_margin=cfg.fep_coh_margin,
+                       y_smooth=cfg.fep_y_smooth)
         shift = self._fep_shift()
         if cfg.fep_basis_file:
             U = np.load(cfg.fep_basis_file)
@@ -308,7 +324,7 @@ class Reconstructor:
                                               self.sg.window, rows_for_zi, fc, log=self.log)
         self.fep_basis_info = info
         self.log(f"FEP removal on: rank {fc.rank}, +-{fc.half_window} samples, basis from {info.get('source')}")
-        return FEPRemover(U, shift, fc, xp=self.xp)
+        return FEPRemover(U, shift, fc, xp=self.xp, pdz=self._fep_pdz(), carrier=self._carrier())
 
     def frame_files(self, frame: int):
         """Raw file indices holding tile-local y frame `frame` (B-scan repeats consecutive)."""
