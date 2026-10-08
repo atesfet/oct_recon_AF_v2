@@ -154,3 +154,45 @@ def retag_tiff(src: str | Path, dst: str | Path | None = None, acquisition: dict
         if tmp_json.exists():
             os.replace(tmp_json, src.with_suffix(src.suffix + ".json"))
     return meta
+
+
+def write_2d_calibrated(path: str | Path, img: np.ndarray, metadata: dict, acquisition: dict | None = None,
+                        info: dict | None = None):
+    """Calibrated float32 2D image (y rows, x columns), e.g. an en-face projection.
+
+    Pixel size from the output axes (x: columns, y: rows), written as standard TIFF resolution in
+    pixels/cm (read by any TIFF reader) and as ImageJ calibration (unit=micron); the same oct_*
+    acquisition keys as the volume plus what the pixel values mean; full metadata in a .json
+    sidecar and in the TIFF Software tag."""
+    path = Path(path)
+    img = np.ascontiguousarray(img, np.float32)
+    v = voxel_size_um(metadata)
+    dx, dy = float(v["x"]), float(v["y"])
+    x = np.asarray(metadata["x"]["values"], float)
+    y = np.asarray(metadata["y"]["values"], float)
+    info = dict(info or {})
+    meta = {"metadata": {k: metadata[k] for k in ("x", "y") if k in metadata},
+            "pixel_size_um": {"x": dx, "y": dy}, "shape_yx": list(img.shape),
+            "origin_mm": {"x": float(x[0]), "y": float(y[0])}, "version": 3, **info}
+    if acquisition:
+        meta["acquisition"] = acquisition
+    desc = "ImageJ=1.53\nimages=1\nunit=micron\n"
+    fields = [("oct_pixel_x_um", dx), ("oct_pixel_y_um", dy), ("oct_axes", "rows_y_columns_x"),
+              ("oct_x0_mm", float(x[0])), ("oct_y0_mm", float(y[0]))]
+    fields += [(f"oct_{k}", val) for k, val in info.items() if isinstance(val, (int, float, str))]
+    fields += [(k, val) for k, val in description_fields({"acquisition": acquisition or {}})
+               if k.startswith(("oct_patch", "oct_focus", "oct_raw", "oct_native", "oct_refr", "oct_system", "oct_probe"))]
+    for k, val in fields:
+        val = f"{val:.10g}" if isinstance(val, float) else str(val).replace("\n", " ").replace("=", ":")
+        desc += f"{k}={val}\n"
+    lines = ["OCT en-face image: octrecon v2",
+             f"Pixel size x (columns) [um]: {dx}", f"Pixel size y (rows) [um]: {dy}",
+             f"First pixel centre x, y [mm]: {x[0]:.6g}, {y[0]:.6g}"]
+    lines += [f"{k}: {val}" for k, val in info.items() if not isinstance(val, (dict, list))]
+    extratags = list(tifffile.imagej_metadata_tag({"Info": "\n".join(lines).replace("=", ":")}, "<"))
+    tifffile.imwrite(path, img, photometric="minisblack", resolution=(1.0 / (dx * 1e-4), 1.0 / (dy * 1e-4)),
+                     resolutionunit="CENTIMETER", description=desc, software=json.dumps(meta, separators=(",", ":")),
+                     extratags=extratags, metadata=None)
+    with open(path.with_suffix(path.suffix + ".json"), "w") as f:
+        json.dump(meta, f, indent=1)
+    return meta

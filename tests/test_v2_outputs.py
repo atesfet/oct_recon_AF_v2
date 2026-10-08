@@ -24,7 +24,7 @@ def _run(w, vol, name, **kw):
 def runs(tmp_path_factory):
     w = tmp_path_factory.mktemp("v2out")
     vol = TF._make_tiled(w, "base")
-    return w, _run(w, vol, "v2"), _run(w, vol, "v1", fep_removal=False, xy_projection=False)
+    return w, _run(w, vol, "v2"), _run(w, vol, "v1", fep_removal=False, xy_projection=False, flatfield_correction=False)
 
 
 def test_v2_files(runs):
@@ -38,13 +38,14 @@ def test_v2_files(runs):
         img = t.asarray()
         assert img.shape == (ny, nx) and img.dtype == np.float32
         xr = t.pages[0].tags["XResolution"].value
-        assert xr[1] / xr[0] == pytest.approx(s2["voxel_size_um"]["x"], rel=1e-4)
+        assert 1e4 * xr[1] / xr[0] == pytest.approx(s2["voxel_size_um"]["x"], rel=1e-4)   # pixels/cm -> um
+        assert t.pages[0].tags["ResolutionUnit"].value == 3
     with tifffile.TiffFile(d / "v2_fep_removed.tiff") as t:
         assert len(t.pages) == ny
 
 
 def test_both_off_is_v1(runs):
-    """fep_removal=False + xy_projection=False writes exactly the v1 file set."""
+    """fep_removal=False + xy_projection=False + flatfield_correction=False writes exactly the v1 file set."""
     _, _, s1 = runs
     names = sorted(p.name for p in Path(s1["output_dir"]).iterdir())
     assert names == sorted(["v1.tiff", "v1.tiff.json", "v1_config.json", "v1_run_summary.json"]) or \

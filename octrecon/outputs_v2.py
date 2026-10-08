@@ -12,13 +12,10 @@ from .io import tiff_writer
 from .io.metadata import voxel_size_um
 
 
-def write_2d_tiff(path: Path, img: np.ndarray, px_um: float, info: dict | None = None):
-    """float32 2D TIFF with ImageJ calibration (um / pixel). NaN = no data."""
-    import tifffile
-    desc = json.dumps(info or {}, default=str)
-    tifffile.imwrite(str(path), np.asarray(img, np.float32), imagej=True,
-                     resolution=(1.0 / px_um, 1.0 / px_um),
-                     metadata={"unit": "micron", "spacing": px_um, "Info": desc})
+def write_2d_tiff(path: Path, img: np.ndarray, md: dict, acq: dict | None, info: dict | None = None):
+    """Calibrated float32 2D TIFF (pixel size from the output x / y axes, unit micron, acquisition
+    metadata, value meaning; .json sidecar). NaN = no data."""
+    return tiff_writer.write_2d_calibrated(path, img, md, acq, info)
 
 
 def _clim(img, lo=1.0, hi=99.7):
@@ -29,12 +26,21 @@ def _clim(img, lo=1.0, hi=99.7):
     return float(a), float(b) if b > a else float(a) + 1.0
 
 
-def write_png(path: Path, img: np.ndarray, clim=None, cmap="gray"):
+def write_png(path: Path, img: np.ndarray, clim=None, cmap="gray", px_um: float | None = None, text: dict | None = None):
+    """8-bit preview; with px_um the physical pixel size is stored (PNG pHYs, pixels per metre)."""
     import matplotlib
     matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+    from PIL import Image, PngImagePlugin
     lo, hi = clim or _clim(img)
-    plt.imsave(str(path), np.where(np.isfinite(img), img, lo), cmap=cmap, vmin=lo, vmax=hi)
+    rgba = matplotlib.colormaps[cmap]((np.clip(np.where(np.isfinite(img), img, lo), lo, hi) - lo) / max(hi - lo, 1e-12))
+    im = Image.fromarray((rgba[..., :3] * 255).round().astype(np.uint8))
+    info = PngImagePlugin.PngInfo()
+    for k, v in (text or {}).items():
+        info.add_text(str(k), str(v))
+    kw = {"pnginfo": info}
+    if px_um:
+        kw["dpi"] = (25400.0 / px_um, 25400.0 / px_um)
+    im.save(str(path), **kw)
     return lo, hi
 
 
@@ -112,14 +118,17 @@ def write_v2_outputs(rec, out_dir: Path, name: str, vol, vol_rm, clim, rm_clims,
         files = {}
         for key in ("mean", "max"):
             tif = out_dir / f"{name}_xy_{key}.tif"
-            write_2d_tiff(tif, P[key], px, dict(info, projection=key, units="dB", pixel_um=px))
-            lo, hi = write_png(out_dir / f"{name}_xy_{key}.png", P[key])
+            write_2d_tiff(tif, P[key], md, acq, dict(info, projection=key, value_unit="dB", nan="no tissue",
+                                                     definition=("20 log10 mean amplitude over the tissue slab" if key == "mean"
+                                                                 else "max dB over the tissue slab")))
+            lo, hi = write_png(out_dir / f"{name}_xy_{key}.png", P[key], px_um=px,
+                               text={"pixel_size_um": px, "value": f"dB {key} projection, display {P[key].dtype}"})
             files[key] = {"tif": str(tif), "png": str(out_dir / f"{name}_xy_{key}.png"), "png_clim_dB": [lo, hi]}
         if "thickness_um" in P:
             tif = out_dir / f"{name}_tissue_thickness_um.tif"
-            write_2d_tiff(tif, P["thickness_um"], px, {"units": "um", "pixel_um": px})
+            write_2d_tiff(tif, P["thickness_um"], md, acq, {"value_unit": "um", "definition": "tissue slab thickness", "zero": "no tissue"})
             write_png(out_dir / f"{name}_tissue_thickness_um.png", np.where(P["footprint"], P["thickness_um"], np.nan),
-                      cmap="viridis")
+                      cmap="viridis", px_um=px)
             files["thickness"] = str(tif)
         res["xy_projection"] = dict(info, files=files, pixel_um=px)
         log(f"wrote xy projections ({info['mode']}): {files['mean']['tif']}")
@@ -134,8 +143,9 @@ def write_v2_outputs(rec, out_dir: Path, name: str, vol, vol_rm, clim, rm_clims,
             clim_rm = tuple(tiff_writer.read_meta(tif)["clim"]) if tif.exists() else (float(clim[0]), float(clim[1]))
         rm_proj = all_z_projection(vol_rm)
         tif2 = out_dir / f"{name}_fep_removed_xy.tif"
-        write_2d_tiff(tif2, rm_proj, px, {"units": "dB", "projection": "mean amplitude over all z", "pixel_um": px})
-        write_png(out_dir / f"{name}_fep_removed_xy.png", rm_proj, cmap="magma")
+        write_2d_tiff(tif2, rm_proj, md, acq, {"value_unit": "dB", "projection": "removed FEP signal",
+                                               "definition": "20 log10 mean amplitude over all z", "nan": "no data"})
+        write_png(out_dir / f"{name}_fep_removed_xy.png", rm_proj, cmap="magma", px_um=px)
         res["fep_removed"] = {"tiff": str(tif), "clim_dB": list(clim_rm), "xy_tif": str(tif2)}
         log(f"wrote removed FEP signal: {tif}")
     if proj is not None or rm_proj is not None:
@@ -175,3 +185,71 @@ def reproject(out_dir, name: str | None = None, tissue_only: bool = True, smooth
         summ.update(res)
         sp.write_text(json.dumps(summ, indent=2, default=str))
     return res
+
+
+def flatfield_correct(vol, md: dict, rows, cols, out_dir: Path, name: str, cfg, log=print, progress=None,
+                      footprint=None) -> tuple[np.ndarray, dict]:
+    """Tile flat-field correction of the stitched dB volume in place (see core/flatfield.py).
+    Writes the correction map (<name>_flatfield_gain_dB.tif, z x v x u). Returns (per-plane clims, info)."""
+    from .core.flatfield import apply_flatfield, estimate_flatfield
+    vox = voxel_size_um(md)
+    if footprint is None:
+        footprint = np.isfinite(tissue_projection(vol, float(vox["x"]), float(vox["z"]), smooth_um=cfg.tissue_smooth_um,
+                                                  threshold_db=cfg.tissue_threshold_db, max_hole_mm2=cfg.tissue_max_hole_mm2,
+                                                  min_area_mm2=cfg.tissue_min_area_mm2, log=lambda m: None)["mean"])
+    ff = estimate_flatfield(vol, footprint, rows, cols, smooth_px=cfg.flatfield_smooth_px,
+                            max_gain_db=cfg.flatfield_max_gain_db, log=log)
+    info = {k: v for k, v in ff.items() if k not in ("G", "N")}
+    if not ff["applied"]:
+        return None, info
+    clims = apply_flatfield(vol, ff, rows, cols, progress=progress)
+    import tifffile
+    gdb = (20 * np.log10(ff["G"])).astype(np.float32)
+    path = out_dir / f"{name}_flatfield_gain_dB.tif"
+    tifffile.imwrite(path, gdb, imagej=True, resolution=(1.0 / float(vox["x"]), 1.0 / float(vox["y"])),
+                     metadata={"unit": "micron", "spacing": float(vox["z"]), "axes": "ZYX",
+                               "Info": "Tile flat-field gain G (dB) per output depth (slices) and position in the tile "
+                                       "(rows: y, columns: x). Corrected amplitude A' = A + max(A - N, 0) (1/G - 1)."})
+    np.save(out_dir / f"{name}_flatfield_noise_floor.npy", ff["N"])
+    info.update(gain_map=str(path), noise_floor_db=(20 * np.log10(np.maximum(ff["N"], 1e-30))).tolist(),
+                smooth_px=cfg.flatfield_smooth_px, max_gain_db=cfg.flatfield_max_gain_db)
+    log(f"flat-field applied; gain map: {path}")
+    return clims, info
+
+
+def flatfield_existing(out_dir, name: str | None = None, smooth_px: float = 8.0, max_gain_db: float = 24.0,
+                       log=print) -> dict:
+    """Apply the tile flat-field to an existing reconstruction that kept its float volume
+    (keep_float_volume=true): corrects the float volume in place, rewrites <name>.tiff and redoes the
+    projections / overview."""
+    from types import SimpleNamespace
+    out_dir = Path(out_dir)
+    if name is None:
+        cands = [c for c in sorted(out_dir.glob("*_dB_float32.npy")) if not c.name.endswith("_fep_removed_dB_float32.npy")]
+        if not cands:
+            raise FileNotFoundError(f"no <name>_dB_float32.npy in {out_dir} (reconstruct with keep_float_volume=true)")
+        name = cands[0].name[:-len("_dB_float32.npy")]
+    sp = out_dir / f"{name}_run_summary.json"
+    summ = json.loads(sp.read_text()) if sp.exists() else {}
+    if (summ.get("flatfield") or {}).get("applied"):
+        raise RuntimeError("flat-field was already applied to this volume")
+    vol = np.load(out_dir / f"{name}_dB_float32.npy", mmap_mode="r+")
+    meta = tiff_writer.read_meta(out_dir / f"{name}.tiff")
+    md, acq = meta["metadata"], meta.get("acquisition")
+    p = (acq or {}).get("patches", {})
+    ty, tx = (p.get("patch_size_px") or [500, 500])[1], (p.get("patch_size_px") or [500, 500])[0]
+    from .core.flatfield import tile_layout
+    rows, cols = tile_layout(vol.shape[0], vol.shape[2], ty, tx)
+    cfg = SimpleNamespace(tissue_smooth_um=30.0, tissue_threshold_db="auto", tissue_max_hole_mm2=0.5,
+                          tissue_min_area_mm2=0.005, flatfield_smooth_px=smooth_px, flatfield_max_gain_db=max_gain_db)
+    clims, info = flatfield_correct(vol, md, rows, cols, out_dir, name, cfg, log=log)
+    vol.flush()
+    if clims is not None:
+        clim = (float(np.nanmin(clims[:, 0])), float(np.nanmax(clims[:, 1])))
+        tiff_writer.write_legacy_tiff(out_dir / f"{name}.tiff", vol, clim, md, acquisition=acq)
+        summ["clim_dB"] = clim
+        log(f"rewrote {out_dir / (name + '.tiff')} (clim {clim[0]:.2f} .. {clim[1]:.2f} dB)")
+    summ["flatfield"] = info
+    sp.write_text(json.dumps(summ, indent=2, default=str))
+    reproject(out_dir, name, log=log)
+    return info

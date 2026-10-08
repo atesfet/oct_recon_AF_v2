@@ -34,11 +34,15 @@ def main(argv=None):
     r.add_argument("--rows", help="comma separated y-tile rows (0-based)")
     r.add_argument("--no-fep", action="store_true", help="disable FEP-film reflection removal (legacy-identical output)")
     r.add_argument("--no-projection", action="store_true", help="do not save the tissue-only xy projection")
-    r.add_argument("--v1", action="store_true", help="v1 / legacy-identical reconstruction (= --no-fep --no-projection)")
+    r.add_argument("--no-flatfield", action="store_true", help="do not correct the tile vignetting (flat-field)")
+    r.add_argument("--v1", action="store_true", help="v1 / legacy-identical reconstruction (= --no-fep --no-projection --no-flatfield)")
     r.add_argument("--set", nargs="*", default=[], metavar="KEY=VALUE", help="any ReconConfig field, JSON values allowed")
     d = sub.add_parser("estimate-dispersion"); d.add_argument("volume"); d.add_argument("--device", default="auto")
     f = sub.add_parser("detect-focus"); f.add_argument("volume"); f.add_argument("--dispersion", type=float); f.add_argument("--device", default="auto")
     x = sub.add_parser("extract", help="extract .oct tile archives (legacy yOCTUnzipTiledScan)"); x.add_argument("volume"); x.add_argument("--delete-archives", action="store_true")
+    ffp = sub.add_parser("flatfield", help="apply the tile flat-field correction to a reconstruction that kept its float volume")
+    ffp.add_argument("output_dir"); ffp.add_argument("--name"); ffp.add_argument("--smooth-px", type=float, default=8.0)
+    ffp.add_argument("--max-gain-db", type=float, default=24.0)
     pj = sub.add_parser("project", help="recompute the tissue-only xy projection from a kept float volume")
     pj.add_argument("output_dir"); pj.add_argument("--name"); pj.add_argument("--all-z", action="store_true")
     pj.add_argument("--smooth-um", type=float, default=30.0); pj.add_argument("--threshold-db", default="auto")
@@ -68,6 +72,8 @@ def main(argv=None):
             base["fep_removal"] = False
         if a.no_projection or a.v1:
             base["xy_projection"] = False
+        if a.no_flatfield or a.v1:
+            base["flatfield_correction"] = False
         for kv in a.set:
             k, v = kv.split("=", 1); base[k] = _val(v)
         s = Reconstructor(ReconConfig.from_dict(base), log=lambda m: print(m, flush=True)).run()
@@ -82,6 +88,9 @@ def main(argv=None):
         from .estimation.focus import detect_focus
         r = detect_focus(a.volume, dispersion_quadratic_term=a.dispersion, device=get_xp(a.device)[1])
         print(json.dumps({k: v for k, v in r.items() if not isinstance(v, (bytes, bytearray))}, indent=2, default=str)); return
+    if a.cmd == "flatfield":
+        from .outputs_v2 import flatfield_existing
+        print(json.dumps(flatfield_existing(a.output_dir, a.name, a.smooth_px, a.max_gain_db), indent=2, default=str)); return
     if a.cmd == "project":
         from .outputs_v2 import reproject
         thr = a.threshold_db if a.threshold_db == "auto" else float(a.threshold_db)

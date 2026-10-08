@@ -116,6 +116,10 @@ class ReconConfig:
     tissue_threshold_db: object = "auto"       # auto (Otsu) | number (dB)
     tissue_max_hole_mm2: float = 0.5           # enclosed non-tissue holes smaller than this are filled
     tissue_min_area_mm2: float = 0.005         # tissue specks smaller than this are dropped
+    # --- v2: tile flat-field (vignetting) correction (see octrecon/core/flatfield.py) ---
+    flatfield_correction: bool = True
+    flatfield_smooth_px: float = 8.0
+    flatfield_max_gain_db: float = 24.0
 
     @classmethod
     def from_dict(cls, d: dict):
@@ -411,6 +415,21 @@ class Reconstructor:
             return out, (to_numpy(db_rm).astype(np.float32, copy=False) if want_rm else None)
         return out
 
+    def tile_blocks(self, n_rows_done: int):
+        """Output (row, column) ranges of the tiles: one block of n_y_px rows per reconstructed y-tile
+        row, and per x-tile the output columns inside [x_centre +- tile range / 2]."""
+        ny = self.si.n_y_px
+        rows = [(k * ny, (k + 1) * ny) for k in range(n_rows_done)]
+        x = self.tg.out_x_mm
+        h = self.si.tile_range_x_mm / 2
+        cols = []
+        for xc in self.si.x_centers_mm:
+            c0 = int(np.searchsorted(x, xc - h - 1e-9))
+            c1 = int(np.searchsorted(x, xc + h - 1e-9))
+            if c1 > c0:
+                cols.append((c0, c1))
+        return rows, cols
+
     def global_y_to_row(self, y_index0: int):
         return divmod(int(y_index0), self.si.n_y_px)
 
@@ -511,15 +530,25 @@ class Reconstructor:
             vol_rm.flush()
         recon_s = time.perf_counter() - t_start
 
-        clim = (float(np.nanmin(plane_clims[:, 0])), float(np.nanmax(plane_clims[:, 1])))
         md = self.metadata(y_sel)
         acq = self.acquisition(md, shape)
+        ff_info = None
+        if cfg.flatfield_correction:
+            from .outputs_v2 import flatfield_correct
+            t0 = time.perf_counter()
+            ff_clims, ff_info = flatfield_correct(vol, md, *self.tile_blocks(len(rows)), out_dir, name, cfg,
+                                                  log=log, progress=self.progress)
+            if ff_clims is not None:
+                plane_clims = ff_clims
+                vol.flush()
+            ff_info["seconds"] = time.perf_counter() - t0
+        clim = (float(np.nanmin(plane_clims[:, 0])), float(np.nanmax(plane_clims[:, 1])))
         summary = {"device": self.device, "rows": rows, "output_dir": str(out_dir),
                    "fep_removal": (dict(self.fep.summary(), basis=getattr(self, "fep_basis_info", None))
                                    if self.fep is not None else None),
                    "voxel_size_um": acq["output"]["voxel_size_um"], "acquisition": acq,
                    "output_shape_yzx": list(shape), "clim_dB": clim,
-                   "reconstruction_seconds": recon_s, "timers": self.timers,
+                   "reconstruction_seconds": recon_s, "timers": self.timers, "flatfield": ff_info,
                    "resolved": self.resolved, "sources": self.sources}
         if cfg.write_tiff:
             self.progress(stage="write_tiff", done=0, total=shape[0])

@@ -26,7 +26,7 @@ needs_vol = pytest.mark.skipif(not VOL or not Path(VOL).exists(), reason="set OC
 
 
 def _rec(**kw):
-    return Reconstructor(ReconConfig(volume_folder=VOL, device=DEVICE, batch_frames=2, **{"fep_removal": False, **kw}), log=lambda m: None)
+    return Reconstructor(ReconConfig(volume_folder=VOL, device=DEVICE, batch_frames=2, **{"fep_removal": False, "flatfield_correction": False, **kw}), log=lambda m: None)
 
 
 @needs_vol
