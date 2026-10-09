@@ -14,9 +14,9 @@ memory-mapped volume larger than RAM):
    removed; the top / bottom tissue surfaces (first / last masked voxel) are smoothed laterally
    and interpolated into the filled holes -> a tissue slab [top, bottom] per column;
 4. projections over the slab (only finite voxels):
-       topk :  P(x,y) = 20 log10( mean of the k (5) largest  max(10^(I/20) - N(z), 0)  over the slab )
+       topk :  P(x,y) = mean of the k (5) largest  max(I - N(z), 0)  over the slab  [dB above noise]
                per-pixel depth selection of the strongest tissue layer, background-subtracted
-               (N(z): noise floor of the columns without tissue)
+               (N(z): noise floor of the columns without tissue, dB)
        mean :  P(x,y) = 20 log10( mean_{z in slab} 10^(I/20) )   (mean amplitude, like the stitching)
        max  :  P(x,y) = max_{z in slab} I
    plus the tissue thickness map (um) and the slab surfaces.
@@ -137,7 +137,6 @@ def tissue_projection(vol, px_um: float, dz_um: float, smooth_um: float = 30.0, 
     if not np.isfinite(nf_db).any():
         nf_db = np.full(nz, -np.inf)
     nf_db = np.where(np.isfinite(nf_db), nf_db, np.nanmin(nf_db[np.isfinite(nf_db)]) if np.isfinite(nf_db).any() else -np.inf)
-    nf_amp = np.power(10.0, nf_db / 20.0).astype(np.float32)[None, :, None]
     # ---- pass 3: projections over the slab
     ptop = np.full((ny, nx), np.nan, np.float32)
     pmean = np.full((ny, nx), np.nan, np.float32)
@@ -152,11 +151,11 @@ def tissue_projection(vol, px_um: float, dz_um: float, smooth_um: float = 30.0, 
             pmean[a:b] = np.where(n_in > 0, 20 * np.log10(amp.sum(1) / np.maximum(n_in, 1)), np.nan)
         pmax[a:b] = np.where(n_in > 0, np.max(np.where(inside, c, -np.inf), 1), np.nan)
         # per-pixel depth selection: mean of the k strongest background-subtracted slices of the slab
-        sig = np.where(inside, np.maximum(amp - nf_amp, 0), 0).astype(np.float32)
+        # dB above the noise floor of each depth (>= 0, no dark tail); mean of the k largest in the slab
+        sig = np.where(inside, np.maximum(c - nf_db[None, :, None], 0), 0).astype(np.float32)
         kk = min(topk, nz)
         top_k = -np.partition(-sig, kk - 1, axis=1)[:, :kk, :]
-        with np.errstate(divide="ignore", invalid="ignore"):
-            ptop[a:b] = np.where(n_in > 0, 20 * np.log10(np.maximum(top_k.sum(1) / np.maximum(np.minimum(n_in, kk), 1), 1e-6)), np.nan)
+        ptop[a:b] = np.where(n_in > 0, top_k.sum(1) / np.maximum(np.minimum(n_in, kk), 1), np.nan)
         if progress:
             progress(stage="projection", done=2 * nchunks + k + 1, total=3 * nchunks)
     thick = np.where(fp, (b_i - t_i + 1) * dz_um, 0).astype(np.float32)

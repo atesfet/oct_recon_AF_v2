@@ -167,7 +167,23 @@ class FEPRemover:
         self.R = cfg.half_window
         self.stats = {"batches": 0, "surfaces": 0, "removed_energy_db": []}
         self.keep_debug = False          # diagnostics: per-A-line factors of the batch (self.last)
+        self._cupy_median = None
         self.last = {}
+
+    def _median(self, a: np.ndarray, size) -> np.ndarray:
+        """2-D running median (mode nearest) of a small host array; on the CUDA backend it runs on the
+        GPU (cupyx), ~80x faster than scipy for the (B, nX) maps of every batch."""
+        if self._cupy_median is None:
+            self._cupy_median = False
+            if self.xp is not np and not hasattr(self.xp, "from_numpy") and hasattr(self.xp, "cuda"):
+                try:
+                    from cupyx.scipy.ndimage import median_filter as cmf
+                    self._cupy_median = cmf
+                except Exception:
+                    self._cupy_median = False
+        if self._cupy_median:
+            return self.xp.asnumpy(self._cupy_median(self.xp.asarray(a, dtype=np.float32), size=size, mode="nearest"))
+        return median_filter(np.asarray(a, np.float32), size=size, mode="nearest")
 
     def _background_power(self, wxp, work, pk, bidx_off, bg, es, ec, n_win, rank):
         """Per-sample power of the signal *under* the reflection (tissue or noise) that the
@@ -262,7 +278,7 @@ class FEPRemover:
             am = _np(wxp, wxp.argmax(cmag, axis=-1))
             pk = np.take_along_axis(cand, am[..., None], -1)[..., 0]
             ysz = min(max(int(cfg.y_smooth), 1), B)
-            pk = median_filter(pk.astype(float), size=(ysz, cfg.lateral_median), mode="nearest").round().astype(np.int64)
+            pk = self._median(pk.astype(np.float32), (ysz, cfg.lateral_median)).round().astype(np.int64)
             pk = np.clip(pk, lo_lim, hi_lim)
             idx = pk[..., None] + k                                  # (B, nX, 2R+1)
             idx_d = wxp.asarray(idx)
@@ -271,7 +287,7 @@ class FEPRemover:
             ec = wxp.sum(wxp.abs(c) ** 2, axis=-1)
             es = wxp.sum(wxp.abs(seg) ** 2, axis=-1) + 1e-30
             frac = _np(wxp, ec / es)
-            fmed = median_filter(frac, size=(ysz, cfg.lateral_median), mode="nearest")
+            fmed = self._median(frac, (ysz, cfg.lateral_median))
             w = np.clip((fmed - cfg.frac_lo) / (cfg.frac_hi - cfg.frac_lo), 0, 1).astype(np.float32)
             if not cfg.use_specular_weight:
                 w = np.ones_like(w)
@@ -293,7 +309,7 @@ class FEPRemover:
                 # Gaussian-smoothed; each A-line then loses that amount along its own c direction
                 ech = np.maximum(_np(wxp, ec), 1e-30)
                 amt = _np(wxp, gain) * np.sqrt(ech)
-                amt = median_filter(amt, size=(ysz, cfg.amount_window), mode="nearest")
+                amt = self._median(amt, (ysz, cfg.amount_window))
                 from scipy.ndimage import gaussian_filter
                 amt = gaussian_filter(amt, sigma=(ysz / 3.0, cfg.amount_window / 6.0), mode="nearest")
                 gain = wxp.asarray(np.minimum(1.0, amt / np.sqrt(ech)).astype(np.float32))

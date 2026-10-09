@@ -14,7 +14,7 @@ output is identical to v1.
 
 | File | Content |
 |---|---|
-| `<name>_xy_topk.tif` | **main image**: per pixel, mean of the 5 strongest background-subtracted slices of the tissue slab (float32 dB, NaN = no tissue) |
+| `<name>_xy_topk.tif` | **main image**: per pixel, mean of the 5 strongest slices of the tissue slab in dB above the noise floor (float32, NaN = no tissue) |
 | `<name>_xy_mean.tif` | mean-amplitude projection over the tissue slab (float32 dB, NaN = no tissue) |
 | `<name>_xy_max.tif` | maximum-intensity projection over the tissue slab |
 | `<name>_xy_mean.png`, `_xy_max.png` | 8-bit previews (1st–99.7th percentile) |
@@ -58,9 +58,9 @@ memory-mapped result, so it works for volumes larger than RAM (full 4500 × 35 �
 Over the voxels `z ∈ slab(x, y)` with finite values (`N` of them):
 
 * **top-k** (main image, as in the reference implementation `Q3Slide_AF_v1`): per pixel the k = 5
-  (≈ 10 µm) strongest slices of the background-subtracted amplitude `max(10^(I/20) − N(z), 0)` inside
-  the slab are averaged, `P_topk = 20·log10(mean of the k largest)`; `N(z)` is the noise floor of the
-  columns without tissue. This follows the brightest tissue layer at every pixel instead of
+  (≈ 10 µm) strongest slices inside
+  the slab are averaged, in dB above the noise floor: `P_topk = mean of the k largest max(I − N(z), 0)`;
+  `N(z)` is the noise floor (dB) of the columns without tissue. Values are ≥ 0 (no dark tail). This follows the brightest tissue layer at every pixel instead of
   diluting it with dark slab voxels, and the background subtraction puts the contrast on the tissue;
 * **mean**: `P_mean(x, y) = 20·log10( (1/N) Σ_z 10^(I(x,y,z)/20) )` — the mean amplitude over the
   whole slab, the same averaging the stitching uses;

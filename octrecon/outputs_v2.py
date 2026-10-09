@@ -136,10 +136,11 @@ def write_v2_outputs(rec, out_dir: Path, name: str, vol, vol_rm, clim, rm_clims,
         files = {}
         for key in [k for k in ("topk", "mean", "max") if k in P]:
             tif = out_dir / f"{name}_xy_{key}.tif"
-            write_2d_tiff(tif, P[key], md, acq, dict(info, projection=key, value_unit="dB", nan="no tissue",
+            write_2d_tiff(tif, P[key], md, acq, dict(info, projection=key, nan="no tissue",
+                                                     value_unit="dB above noise floor" if key == "topk" else "dB",
                                                      definition={"mean": "20 log10 mean amplitude over the tissue slab",
                                                                  "max": "max dB over the tissue slab",
-                                                                 "topk": "20 log10 mean of the k strongest background-subtracted slices of the tissue slab"}[key]))
+                                                                 "topk": "mean of the k strongest slices of the tissue slab, in dB above the noise floor of their depth"}[key]))
             lo, hi = write_png(out_dir / f"{name}_xy_{key}.png", P[key], px_um=px,
                                text={"pixel_size_um": px, "value": f"dB {key} projection, display {P[key].dtype}"})
             files[key] = {"tif": str(tif), "png": str(out_dir / f"{name}_xy_{key}.png"), "png_clim_dB": [lo, hi]}
