@@ -40,10 +40,11 @@ and the noise floor as `<name>_flatfield_noise_floor.npy`; the run summary has `
 
 ## Results (`10um_FOV_1`)
 
-Brightness step across the seams in the tissue-only projection (median |difference| of 5-pixel bands
-on both sides, 50-pixel blocks along the seam): x seams 3.6 → 1.7 dB, y seams 2.7 → 1.1 dB (the same
-measure between two columns inside a patch: 0.6 dB); folded patch modulation 5.2 → 1.5 dB. The
-remaining step at the x seams is mostly the texture discontinuity between non-overlapping patches.
+Full volume (final run; tissue-only top-k projection, median |difference| of 5-pixel bands on both
+sides of the seam, 50-pixel blocks along it): seams between patch columns 3.8 → 1.8 dB, between patch
+rows 2.6 → 1.3 dB (the same measure inside a patch: 0.7 dB); patch pattern folded over all fully
+covered patches 5.4 → 1.5 dB (5th–95th percentile). Estimated from 53 patches; 131 s for the full
+volume. The remaining step is mostly the texture discontinuity between non-overlapping patches.
 
 ## Use
 

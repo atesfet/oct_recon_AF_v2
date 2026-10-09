@@ -92,8 +92,8 @@ only small (B, nX) arrays go to the host.
 
 ## Results
 
-All numbers are for the final method (coherence cap on, defaults above); "uncapped" is the same
-method without step 6 (the first v2 version).
+All numbers are for the final method (coherence cap and smooth removed amount, defaults above);
+"uncapped" is the first v2 version (per-A-line removal without steps 6 and 7).
 
 **Synthetic ground truth** (`tests/test_fep.py`; reflection = exact PSF with sub-pixel tilt, laterally
 coherent phase, ±20 % amplitude jitter, on speckle tissue):
@@ -112,31 +112,33 @@ the 9 rows under the film peak (dB rel. tissue; lower is better) and correlation
 
 | film | no removal | uncapped | final |
 |---|---|---|---|
-| none (tissue only) | 0 / 1.00 | −6.1 dB / 0.84 | **−15.1 dB / 0.98** |
-| −10 dB (weak, like tile corners) | −5.4 dB / 0.90 | −4.0 dB / 0.74 | **−7.7 dB / 0.91** |
-| 0 dB (as in the data) | +4.6 dB / 0.55 | −2.0 dB / 0.57 | **−2.8 dB / 0.70** |
-| +10 dB | +14.6 dB / 0.32 | +3.8 dB / 0.27 | +3.9 dB / 0.28 |
+| none (tissue only) | 0 / 1.00 | −6.1 dB / 0.84 | **−24.2 dB / 1.00** |
+| −10 dB (weak, like tile corners) | −5.4 dB / 0.90 | −4.0 dB / 0.74 | **−8.6 dB / 0.93** |
+| 0 dB (as in the data) | +4.6 dB / 0.55 | −2.0 dB / 0.57 | **−2.9 dB / 0.74** |
+| +10 dB | +14.6 dB / 0.32 | +3.8 dB / 0.27 | +5.0 dB / 0.33 |
 
-**Real data, y-tile row 4** (stitched output). Film where it is the only signal (tiles without
-tissue), peak above the background: 14.3 / 16.7 dB → **1.9 / 2.0 dB** (uncapped: 1.9 / 2.0 dB).
-Change of the tissue signal at the surface (z = −1.5 µm) relative to v1: tile corners (weak film)
-−7.7 dB uncapped → **−1.9 dB**; tile centres (strong film glow) −11.3 dB → **−5.0 dB**.
-En-face statistics (dB, v1 → final):
+**Real data, y-tile row 4** (stitched output, film removal only). Film where it is the only signal
+(tiles without tissue), peak above the background: 14.3 / 16.7 dB → **1.9 / 2.4 dB** (uncapped:
+1.9 / 2.0 dB). Change of the tissue signal at the surface (z = −1.5 µm) relative to v1: tile corners
+(weak film) −7.7 dB uncapped → **−2.0 dB**; tile centres (strong film glow) −11.3 dB → **−6.3 dB**.
+Line artefacts (energy of short horizontal dashes): v1 −14.2 dB, per-B-scan removal −9.8 dB, final
+−13.0 dB. En-face statistics (dB, v1 → final):
 
 | output depth | median | 99th percentile |
 |---|---|---|
-| z = −5.5 µm (film above tissue) | −10.7 → −12.8 | 7.9 → 5.7 |
-| z = 0.5 µm (tissue surface) | −5.1 → −8.6 | 10.2 → 7.8 |
-| z = 4.5 µm | −5.1 → −7.9 | 10.7 → 8.4 |
-| z = 8.5 µm | −7.4 → −10.3 | 9.5 → 7.5 |
-| z = 14.5 µm | −14.7 → −15.6 | 6.0 → 5.0 |
+| z = −5.5 µm (film above tissue) | −10.7 → −12.9 | 7.9 → 5.1 |
+| z = 0.5 µm (tissue surface) | −5.1 → −9.2 | 10.2 → 7.2 |
+| z = 4.5 µm | −5.1 → −8.5 | 10.7 → 7.8 |
+| z = 8.5 µm | −7.4 → −10.7 | 9.5 → 7.0 |
+| z = 14.5 µm | −14.7 → −15.5 | 6.0 → 4.8 |
 | z = 30.5 µm (deep tissue) | −18.2 → −18.2 | −9.4 → −9.5 |
 
-**Cost, full volume** (4500 × 35 × 6000, RTX 3080 Ti Laptop, raw data on a USB SSD, 2026-10-08):
-reconstruction 1177 s with FEP removal off vs 1262 s on (+7.3 %); the run is limited by reading the
-raw data (I/O wait 350 s → 165 s), so most of the extra GPU work fills time spent waiting for the
-disk. Plus ≈ 12 s at start-up (incl. learning the basis) and ≈ 2.2 min for the v2 outputs (tissue
-mask + projections, removed-signal volume).
+**Cost, full volume** (4500 × 35 × 6000, RTX 3080 Ti Laptop, raw data on a USB SSD, 2026-10-09):
+reconstruction 1155 s with all v2 processing vs 1177 s for v1 — the same within the run-to-run
+variation, because the run is limited by reading the raw data (the extra GPU work fills time spent
+waiting for the disk; the per-batch running medians run on the GPU). Plus ≈ 11 s at start-up (incl.
+learning the basis), 131 s for the tile flat-field (doc 09) and 207 s for the v2 outputs (tissue mask,
+projections, removed-signal volume): 25.3 min end to end.
 
 ## Limitations
 

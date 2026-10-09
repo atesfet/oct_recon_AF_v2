@@ -10,8 +10,9 @@
 > ([`docs/08_xy_projection.md`](docs/08_xy_projection.md)), and corrects the **tile seams** (the brightness
 > falloff towards the patch edges, flat-field; [`docs/09_tile_flatfield.md`](docs/09_tile_flatfield.md)).
 > `--v1` switches all three off.
-> Speed figures below are for v1. Full volume on the GPU, same day and disk: v1 19.6 min vs v2
-> 21.0 min reconstruction (+7.3 %, largely hidden behind the disk I/O) + ≈ 2 min for the v2 outputs.
+> Speed figures below are for v1. Full volume on the GPU, same disk: v1 19.6 min vs v2
+> 19.3 min reconstruction with all v2 processing (I/O-bound, the same as v1) + 2.2 min seam correction
+> + 3.5 min v2 outputs: 25.3 min end to end.
 > The removal protects the tissue with a lateral-coherence cap (only the film's coherent share is removed).
 
 GPU/CPU reconstruction of **tiled Thorlabs OCT volumes** with a local **web app**.
