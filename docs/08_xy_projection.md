@@ -18,6 +18,7 @@ output is identical to v1.
 | `<name>_xy_mean.tif` | mean-amplitude projection over the tissue slab (float32 dB, NaN = no tissue) |
 | `<name>_xy_max.tif` | maximum-intensity projection over the tissue slab |
 | `<name>_xy_mean.png`, `_xy_max.png` | 8-bit previews (1st–99.7th percentile) |
+| `final_projection/` | copy of the main image (`_xy_topk.tif`, its `.json` sidecar and PNG preview) |
 | `<name>_tissue_thickness_um.tif` (+ `.png`) | thickness of the slab used per column (µm, 0 = no tissue) |
 | `<name>_xy_mean_enhanced.png`, `_xy_max_enhanced.png` | display-only preview, local contrast normalisation: (dB − local mean) / local SD, Gaussian σ = 80 µm, window ±2.5 |
 

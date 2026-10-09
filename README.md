@@ -275,6 +275,7 @@ its β).
 | `<name>_fep_removed.tiff` (+ `.json`) | **v2.** The removed (subtracted) FEP signal as a volume, same grid / format as `<name>.tiff`. |
 | `<name>_fep_removed_xy.tif` (+ `.png`) | **v2.** Its xy projection (mean over all z). |
 | `<name>_fep_overview.png` | **v2.** Tissue projection, removed-signal projection and a B-scan of both at a glance. |
+| `final_projection/` | **v2.** The final projection in one place: `<name>_xy_topk.tif` (+ `.json` metadata) and its PNG preview. |
 | `<name>_xy_mean_enhanced.png` / `_xy_max_enhanced.png` | **v2.** Display-only preview with local contrast normalisation (80 µm): features equally visible in bright and dim regions. Not quantitative. |
 | `<name>_flatfield_gain_dB.tif` | **v2.** Tile flat-field gain per output depth and position in the patch (doc 09). |
 

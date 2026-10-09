@@ -31,7 +31,8 @@ def test_v2_files(runs):
     w, s2, _ = runs
     d = Path(s2["output_dir"])
     for f in ("v2.tiff", "v2_xy_mean.tif", "v2_xy_max.tif", "v2_xy_mean.png", "v2_tissue_thickness_um.tif",
-              "v2_fep_removed.tiff", "v2_fep_removed_xy.tif", "v2_fep_overview.png"):
+              "v2_fep_removed.tiff", "v2_fep_removed_xy.tif", "v2_fep_overview.png",
+              "final_projection/v2_xy_topk.tif", "final_projection/v2_xy_topk.tif.json", "final_projection/v2_xy_topk.png"):
         assert (d / f).exists(), f
     ny, nz, nx = s2["output_shape_yzx"]
     with tifffile.TiffFile(d / "v2_xy_mean.tif") as t:

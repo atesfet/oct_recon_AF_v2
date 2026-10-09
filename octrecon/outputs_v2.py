@@ -154,6 +154,15 @@ def write_v2_outputs(rec, out_dir: Path, name: str, vol, vol_rm, clim, rm_clims,
             write_png(out_dir / f"{name}_tissue_thickness_um.png", np.where(P["footprint"], P["thickness_um"], np.nan),
                       cmap="viridis", px_um=px)
             files["thickness"] = str(tif)
+        # the final projection (TIFF + metadata sidecar + PNG preview) collected in one subfolder
+        import shutil
+        main = "topk" if "topk" in files else "mean"
+        fin = out_dir / "final_projection"
+        fin.mkdir(exist_ok=True)
+        for src in (Path(files[main]["tif"]), Path(files[main]["tif"] + ".json"), Path(files[main]["png"])):
+            if src.exists():
+                shutil.copy2(src, fin / src.name)
+        files["final_projection_dir"] = str(fin)
         res["xy_projection"] = dict(info, files=files, pixel_um=px)
         log(f"wrote xy projections ({info['mode']}): {files['mean']['tif']}")
     rm_proj = None
