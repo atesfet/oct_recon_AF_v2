@@ -79,7 +79,8 @@ class ReconConfig:
     raw_input: str = "auto"                      # auto (read .oct in place if not unzipped) | extract
     delete_archives_after_extract: bool = False
     # --- execution ---
-    device: str = "auto"                         # auto | gpu | cpu
+    device: str = "auto"                         # auto | gpu | gpu:N | cpu | mps
+    gpu_id: object = "auto"                      # NVIDIA GPU index (nvidia-smi numbering) | auto = most free memory
     precision: str = "float32"                   # float32 | float64
     gpu_fused_kernel: bool = True
     batch_frames: int = 50
@@ -146,7 +147,16 @@ class Reconstructor:
         self.log = log
         self.progress = progress or (lambda **kw: None)
         self.cancel = cancel or threading.Event()
-        self.xp, self.device = get_xp(cfg.device)
+        self.xp, self.device = get_xp(cfg.device, gpu_id=cfg.gpu_id)
+        self.gpu_info = None
+        if self.device == "gpu":
+            from .backend import current_gpu
+            self.gpu_info = current_gpu()
+            g = self.gpu_info or {}
+            self.log(f"using GPU {g.get('id')}: {g.get('name')} ({g.get('total_GB')} GB"
+                     + (f", {g['free_GB']} GB free" if g.get('free_GB') is not None else "") + ")")
+        elif cfg.gpu_id not in (None, "", "auto") and self.device != "gpu":
+            self.log(f"note: gpu_id={cfg.gpu_id} ignored on device {self.device}")
         self.dtype = np.float32 if cfg.precision == "float32" else np.float64
         if is_torch(self.xp) and self.dtype != np.float32:
             self.log("note: the Apple GPU (MPS) supports float32 only -> precision set to float32")
@@ -503,7 +513,8 @@ class Reconstructor:
             json.dump({"config": asdict(cfg), "resolved": self.resolved, "sources": self.sources,
                        "device": self.device, "volume_folder": str(self.volume),
                        "storage": self.layout}, f, indent=2, default=str)
-        log(f"device={self.device}  output (y,z,x)={shape}  rows={len(rows)}/{n_rows_total}  -> {out_dir}")
+        log(f"device={self.device}" + (f" (GPU {self.gpu_info.get('id')}: {self.gpu_info.get('name')})" if self.gpu_info else "")
+            + f"  output (y,z,x)={shape}  rows={len(rows)}/{n_rows_total}  -> {out_dir}")
         for k, v in self.resolved.items():
             log(f"  {k} = {v}   [{self.sources.get(k, 'config')}]")
 
@@ -559,7 +570,7 @@ class Reconstructor:
                 vol.flush()
             ff_info["seconds"] = time.perf_counter() - t0
         clim = (float(np.nanmin(plane_clims[:, 0])), float(np.nanmax(plane_clims[:, 1])))
-        summary = {"device": self.device, "rows": rows, "output_dir": str(out_dir),
+        summary = {"device": self.device, "gpu": self.gpu_info, "rows": rows, "output_dir": str(out_dir),
                    "fep_removal": (dict(self.fep.summary(), basis=getattr(self, "fep_basis_info", None))
                                    if self.fep is not None else None),
                    "voxel_size_um": acq["output"]["voxel_size_um"], "acquisition": acq,

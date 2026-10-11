@@ -246,6 +246,7 @@ its β).
 | Key | Default | Notes |
 |---|---|---|
 | `device` | `auto` | `auto` (CUDA, else Apple MPS, else CPU), `gpu` (CUDA or MPS), `mps`, `cpu`. |
+| `gpu_id` | `auto` | **v2.** Which NVIDIA GPU to use on a multi-GPU machine: the index shown by `nvidia-smi` / `python -m octrecon gpus`, or `auto` (the GPU with the most free memory). Also `device: gpu:N`. Web app: GPU drop-down under *Compute*. |
 | `precision` | `float32` | Within 1e-4 dB of `float64`; the uint16 step is 1e-3 dB. MPS supports float32 only. |
 | `gpu_fused_kernel` | `true` | Fused CUDA pre-FFT kernel (6× faster spectral stage). |
 | `batch_frames` | 50 | B-scans per batch. Lower it for GPUs with little memory; 50 uses about 4 GB of VRAM. |
@@ -312,6 +313,8 @@ python -m octrecon reconstruct /data/sample/OCTVolume --config my_config.json --
 python -m octrecon reconstruct /data/sample/OCTVolume --no-fep                # no FEP removal
 python -m octrecon reconstruct /data/sample/OCTVolume --no-projection         # no xy projection
 python -m octrecon reconstruct /data/sample/OCTVolume --no-flatfield          # no tile seam correction
+python -m octrecon gpus                                                       # list NVIDIA GPUs (index, memory, load)
+python -m octrecon reconstruct /data/sample/OCTVolume --gpu 1                 # run on GPU 1 (or --device gpu:1; --gpu auto)
 python -m octrecon reconstruct /data/sample/OCTVolume --v1                    # v1 / legacy-identical (= --no-fep --no-projection --no-flatfield)
 python -m octrecon flatfield /data/recon/sample_recon                         # apply the seam correction to a kept float volume
 python -m octrecon project /data/recon/sample_recon --max-hole-mm2 0.5        # redo the tissue-only xy projection (needs keep_float_volume)

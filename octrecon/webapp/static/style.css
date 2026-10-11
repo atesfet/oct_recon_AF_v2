@@ -124,3 +124,6 @@ label.inline { flex-direction: row; align-items: center; gap: 6px; font-weight: 
 
 .fep-box { margin-top: 14px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; }
 .fep-box .hint { margin: 4px 0 6px; }
+
+#gpu_id { display: block; margin-top: 6px; max-width: 100%; font-size: 12px; }
+#gpu_id.hidden { display: none; }

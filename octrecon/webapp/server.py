@@ -78,11 +78,12 @@ def system_info():
     except Exception:
         has_cupy = False
     if has_cupy and gpu_available():
-        import cupy as cp
-        p = cp.cuda.runtime.getDeviceProperties(0)
-        info.update(gpu_available=True, gpu_kind="cuda",
-                    gpu_name=p["name"].decode() if isinstance(p["name"], bytes) else p["name"],
-                    vram_GB=round(p["totalGlobalMem"] / 1e9, 1))
+        from ..backend import choose_gpu, list_gpus
+        gpus = list_gpus()
+        g0 = next((g for g in gpus if g["id"] == choose_gpu(gpus)), {}) if gpus else {}
+        info.update(gpu_available=True, gpu_kind="cuda", gpus=gpus, gpu_auto=g0.get("id"),
+                    gpu_name=g0.get("name") if len(gpus) <= 1 else f"{len(gpus)} NVIDIA GPUs",
+                    vram_GB=g0.get("total_GB"))
     elif sys.platform == "darwin":
         ok, msg = mps_status()
         if ok:
@@ -233,8 +234,10 @@ JOB = Job()
 
 # --------------------------------------------------------------------------- estimation endpoints
 def _device(d):
+    """Validate the requested device and keep the GPU index (e.g. 'gpu:1') for the estimators."""
     from ..backend import get_xp
-    return get_xp(d or "auto")[1]
+    name = get_xp(d or "auto")[1]
+    return d if (name == "gpu" and d and str(d).startswith(("gpu:", "cuda:"))) else name
 
 
 def api_estimate_dispersion(body):

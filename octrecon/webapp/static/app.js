@@ -44,6 +44,14 @@ async function loadSystem() {
   $("gpu-desc").textContent = !s.gpu_available ? (s.gpu_note || "not available")
     : s.gpu_kind === "mps" ? `${s.gpu_name} · PyTorch Metal backend (float32)` : `${s.gpu_name} · CuPy/CUDA · fastest (I/O-bound)`;
   $("cpu-desc").textContent = `${s.cpu_count} threads · Numba + multithreaded FFT (~5× slower than GPU)`;
+  if (s.gpu_kind === "cuda" && (s.gpus || []).length) {
+    const sel = $("gpu_id"); sel.innerHTML = "";
+    const opt = (v, t) => { const o = document.createElement("option"); o.value = v; o.textContent = t; sel.appendChild(o); };
+    opt("auto", `auto (most free memory: GPU ${s.gpu_auto})`);
+    for (const g of s.gpus) opt(g.id, `GPU ${g.id}: ${g.name} · ${g.free_GB != null ? g.free_GB + " / " : ""}${g.total_GB} GB${g.free_GB != null ? " free" : ""}${g.util_pct != null ? ` · ${g.util_pct}% busy` : ""}`);
+    sel.classList.remove("hidden");
+    if (s.gpus.length === 1) $("gpu-desc").textContent = `${s.gpus[0].name} · CuPy/CUDA · fastest (I/O-bound)`;
+  }
   if (!s.gpu_available) { $("dev-gpu").classList.add("disabled"); document.querySelector("input[value=gpu]").disabled = true; }
   document.querySelector(`input[value=${s.gpu_available ? "gpu" : "cpu"}]`).checked = true;
   const d = s.defaults;
@@ -110,7 +118,7 @@ async function detectFocus() {
   if (!S.info) return toast("Inspect a volume first", true);
   const btn = $("btn-detect-focus"); busy(btn, true); $("focus-status").textContent = "reading a few B-scans…";
   try {
-    const r = await api("/api/estimate/focus", { volume_folder: S.info.volume_folder, device: device(), dispersion_quadratic_term: dispersionValue() });
+    const r = await api("/api/estimate/focus", { volume_folder: S.info.volume_folder, device: deviceForTools(), dispersion_quadratic_term: dispersionValue() });
     $("focus_mode").value = "value"; onFocusMode();
     $("focus_value").value = r.focus_positions.map((x) => Math.round(x)).join(", ");
     $("src-focus").textContent = `automatic detection (${r.method || ""}) · ${summariseFocus(r.focus_positions)}`;
@@ -135,7 +143,7 @@ async function estimateDispersion() {
   if (!S.info) return toast("Inspect a volume first", true);
   const btn = $("btn-est-disp"); busy(btn, true);
   try {
-    const r = await api("/api/estimate/dispersion", { volume_folder: S.info.volume_folder, device: device(), initial: dispersionValue() });
+    const r = await api("/api/estimate/dispersion", { volume_folder: S.info.volume_folder, device: deviceForTools(), initial: dispersionValue() });
     $("dispersion").value = fmtNum(r.value); S.touched.dispersion_quadratic_term = "estimate";
     $("src-dispersion_quadratic_term").textContent = `automatic estimate (${r.method || ""}) in ${(r.elapsed_s || 0).toFixed(0)} s`;
     showFig("disp-fig", r.figure_png);
@@ -145,6 +153,8 @@ async function estimateDispersion() {
 
 // ------------------------------------------------------------------ config
 function device() { const r = document.querySelector("input[name=device]:checked"); return r ? r.value : "auto"; }
+function gpuChoice() { const e = $("gpu_id"); return (!e || e.classList.contains("hidden") || e.value === "auto") ? "auto" : +e.value; }
+function deviceForTools() { const d = device(); const g = gpuChoice(); return d === "gpu" && g !== "auto" ? `gpu:${g}` : d; }
 const FEP_NUM = ["fep_keep_level", "fep_rank", "fep_half_window", "fep_search", "fep_lateral_median", "fep_detect_min_db", "fep_frac_lo", "fep_frac_hi", "fep_max_surfaces", "fep_coh_lag", "fep_coh_window", "fep_coh_margin"];
 function buildConfig() {
   if (!$("volume").value.trim()) throw new Error("Select the raw OCT volume folder first (step 1)");
@@ -161,7 +171,7 @@ function buildConfig() {
     interp_method: $("interp_method").value,
     apply_path_length_correction: $("opc").checked,
     raw_input: $("raw_input").value, delete_archives_after_extract: $("delete_archives").checked,
-    device: device(), precision: $("precision").value, gpu_fused_kernel: $("gpu_fused_kernel").checked,
+    device: device(), gpu_id: gpuChoice(), precision: $("precision").value, gpu_fused_kernel: $("gpu_fused_kernel").checked,
     batch_frames: +$("batch_frames").value, io_threads: +$("io_threads").value, prefetch_batches: +$("prefetch_batches").value,
     rows: parseRows($("rows").value), write_tiff: $("write_tiff").checked, keep_float_volume: $("keep_float_volume").checked,
     legacy_double_quantization: $("legacy_double_quantization").checked,
@@ -200,7 +210,9 @@ function applyConfig(c) {
   for (const k of FEP_NUM) if (c[k] !== undefined && c[k] !== null) $(k).value = c[k];
   if (c.apply_path_length_correction !== undefined) $("opc").checked = !!c.apply_path_length_correction;
   if (c.rows) $("rows").value = c.rows.join(",");
-  if (c.device) { const r = document.querySelector(`input[value=${c.device}]`); if (r && !r.disabled) r.checked = true; }
+  if (c.device) { const r = document.querySelector(`input[value="${String(c.device).split(":")[0]}"]`); if (r && !r.disabled) r.checked = true; }
+  const gid = c.gpu_id !== undefined && c.gpu_id !== "auto" ? c.gpu_id : (String(c.device || "").includes(":") ? String(c.device).split(":")[1] : null);
+  if (gid !== null && gid !== undefined && $("gpu_id").querySelector(`option[value="${gid}"]`)) $("gpu_id").value = String(gid);
   updatePath();
 }
 

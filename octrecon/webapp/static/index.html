@@ -157,7 +157,8 @@
   <section class="card" id="card-compute">
     <h2><span class="step">4</span> Compute</h2>
     <div class="devices">
-      <label class="devcard" id="dev-gpu"><input type="radio" name="device" value="gpu"><div><b>GPU</b><span id="gpu-desc">checking…</span></div></label>
+      <label class="devcard" id="dev-gpu"><input type="radio" name="device" value="gpu"><div><b>GPU</b><span id="gpu-desc">checking…</span>
+        <select id="gpu_id" class="hidden" title="NVIDIA GPU used for the reconstruction (numbering as in nvidia-smi)"></select></div></label>
       <label class="devcard" id="dev-cpu"><input type="radio" name="device" value="cpu"><div><b>CPU</b><span id="cpu-desc">…</span></div></label>
     </div>
     <details>
