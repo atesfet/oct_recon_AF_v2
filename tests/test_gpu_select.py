@@ -69,3 +69,52 @@ def test_reconstruction_records_the_gpu(tmp_path):
     assert summ["gpu"]["name"] == list_gpus()[0]["name"]
     with pytest.raises(ValueError):
         Reconstructor(ReconConfig(volume_folder=str(vol), device="gpu", gpu_id=99), log=lambda m: None)
+
+
+def test_auto_keeps_the_gpu_selected_in_the_thread():
+    """A helper asking for plain 'gpu'/'auto' in the middle of a run must not move it to another GPU."""
+    from octrecon.backend import resolve_gpu_index
+    gpus = [{"id": 0, "free_GB": 1.0, "total_GB": 16.0, "name": "a"},
+            {"id": 1, "free_GB": 20.0, "total_GB": 24.0, "name": "b"}]
+    assert resolve_gpu_index("auto", 2, gpus, current=None) == 1        # nothing selected yet: most free memory
+    assert resolve_gpu_index("auto", 2, gpus, current=0) == 0           # already on GPU 0: stay there
+    assert resolve_gpu_index(None, 2, gpus, current=0) == 0
+    assert resolve_gpu_index(1, 2, gpus, current=0) == 1                # an explicit index always wins
+    with pytest.raises(ValueError, match="does not exist"):
+        resolve_gpu_index(2, 2, gpus, current=0)
+
+
+@pytest.mark.skipif(not HAVE_GPU, reason="no NVIDIA GPU")
+def test_listing_gpus_creates_no_cuda_context():
+    """gpu_available()/list_gpus() must not reserve memory on GPU 0 (no CUDA context)."""
+    import subprocess
+    code = ("import os, subprocess, sys; sys.path.insert(0, %r)\n"
+            "from octrecon.backend import gpu_available, list_gpus\n"
+            "assert gpu_available() and list_gpus()\n"
+            "out = subprocess.run(['nvidia-smi', '--query-compute-apps=pid', '--format=csv,noheader'],"
+            " capture_output=True, text=True).stdout\n"
+            "print('CONTEXT' if str(os.getpid()) in out.split() else 'NO_CONTEXT')\n") % str(ROOT)
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120)
+    assert "NO_CONTEXT" in r.stdout, r.stdout + r.stderr
+
+
+@pytest.mark.skipif(not HAVE_GPU, reason="no NVIDIA GPU")
+def test_estimators_inside_a_run_get_the_run_gpu(tmp_path, monkeypatch):
+    """Focus detection during set-up is called with 'gpu:N' (it used to get plain 'gpu' and re-ran the
+    auto choice, which moved the rest of the run to another GPU)."""
+    import test_formats as TF
+    import octrecon.estimation.focus as F
+    from octrecon.backend import current_gpu
+    from octrecon.pipeline import ReconConfig, Reconstructor
+    seen = {}
+    real = F.detect_focus
+
+    def spy(*a, **kw):
+        seen["device"] = kw.get("device")
+        return real(*a, **kw)
+    monkeypatch.setattr(F, "detect_focus", spy)
+    vol = TF._make_tiled(tmp_path, "base")
+    R = Reconstructor(ReconConfig(volume_folder=str(vol), device="gpu", gpu_id=0, focus_positions="estimate",
+                                  crop_z_range_mm="none", fep_removal=False), log=lambda m: None)
+    assert seen.get("device") == "gpu:0"
+    assert current_gpu()["id"] == 0 and R.gpu_info["id"] == 0

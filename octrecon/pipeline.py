@@ -153,7 +153,8 @@ class Reconstructor:
             from .backend import current_gpu
             self.gpu_info = current_gpu()
             g = self.gpu_info or {}
-            self.log(f"using GPU {g.get('id')}: {g.get('name')} ({g.get('total_GB')} GB"
+            self.log(f"using GPU {g.get('id')}: {g.get('name')} (nvidia-smi index {g.get('smi_index')}, "
+                     f"PCI {g.get('pci')}, {g.get('total_GB')} GB"
                      + (f", {g['free_GB']} GB free" if g.get('free_GB') is not None else "") + ")")
         elif cfg.gpu_id not in (None, "", "auto") and self.device != "gpu":
             self.log(f"note: gpu_id={cfg.gpu_id} ignored on device {self.device}")
@@ -208,14 +209,14 @@ class Reconstructor:
         if cfg.dispersion_quadratic_term == "estimate":
             from .estimation.dispersion import estimate_dispersion
             self.log("estimating dispersion automatically ...")
-            est = estimate_dispersion(vol, device=self.device, initial=disp, log=self.log)
+            est = estimate_dispersion(vol, device=self._device_spec(), initial=disp, log=self.log)
             disp, src["dispersion_quadratic_term"] = float(est["value"]), f"automatic estimate ({est.get('method', '')})"
         self.sg = build_spectral_geometry(self.lambda_nm, disp, n_med, cfg.interp_method)
         focus, src["focus_positions"] = P.resolve_focus(si, vol, cfg.focus_positions)
         if focus is None:
             from .estimation.focus import detect_focus
             self.log("detecting focus position automatically ...")
-            det = detect_focus(vol, dispersion_quadratic_term=disp, device=self.device, log=self.log)
+            det = detect_focus(vol, dispersion_quadratic_term=disp, device=self._device_spec(), log=self.log)
             focus = np.asarray(det["focus_positions"], float)
             src["focus_positions"] = f"automatic detection ({det.get('method', '')})"
         self.focus = focus
@@ -342,11 +343,25 @@ class Reconstructor:
         return [frame * n + a for a in range(n)]
 
     # ------------------------------------------------------------------ core
+    def _device_spec(self) -> str:
+        """Device string that pins helpers (estimators) to this run's GPU."""
+        if self.device == "gpu" and self.gpu_info and self.gpu_info.get("id") is not None:
+            return f"gpu:{self.gpu_info['id']}"
+        return self.device
+
+    def _pin_gpu(self):
+        """CuPy's current device is per thread: re-apply this run's GPU (e.g. when run() is called
+        from another thread than the constructor, or a helper changed it)."""
+        if self.device == "gpu" and self.gpu_info and self.gpu_info.get("id") is not None:
+            from .backend import use_gpu
+            use_gpu(self.gpu_info["id"])
+
     def process_row(self, yi: int, frames=None, pool=None, on_batch=None, return_removed=False):
         """Reconstruct output planes of y-tile row `yi`.
         frames: tile-local frame indices (0-based) to produce; default all.
         Returns float32 dB array (nFrames, nOutZ, nOutX) on host; with return_removed (and FEP
         removal on) also the removed signal |s - s'| stitched with the same weights (dB)."""
+        self._pin_gpu()
         xp, cfg, hdr = self.xp, self.cfg, self.hdr
         frames = np.arange(self.si.n_y_px) if frames is None else np.asarray(frames)
         nF = len(frames)
@@ -500,6 +515,7 @@ class Reconstructor:
                                    self.focus, shape, voxel_size_um(md))
 
     def run(self):
+        self._pin_gpu()
         cfg, log = self.cfg, self.log
         out_dir = Path(cfg.output_root) / cfg.output_name
         out_dir.mkdir(parents=True, exist_ok=True)

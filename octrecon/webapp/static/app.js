@@ -48,7 +48,7 @@ async function loadSystem() {
     const sel = $("gpu_id"); sel.innerHTML = "";
     const opt = (v, t) => { const o = document.createElement("option"); o.value = v; o.textContent = t; sel.appendChild(o); };
     opt("auto", `auto (most free memory: GPU ${s.gpu_auto})`);
-    for (const g of s.gpus) opt(g.id, `GPU ${g.id}: ${g.name} · ${g.free_GB != null ? g.free_GB + " / " : ""}${g.total_GB} GB${g.free_GB != null ? " free" : ""}${g.util_pct != null ? ` · ${g.util_pct}% busy` : ""}`);
+    for (const g of s.gpus) opt(g.id, `GPU ${g.id}${g.smi_index != null && g.smi_index !== g.id ? ` (nvidia-smi ${g.smi_index})` : ""}: ${g.name} · PCI ${g.pci} · ${g.free_GB != null ? g.free_GB + " / " : ""}${g.total_GB} GB${g.free_GB != null ? " free" : ""}${g.util_pct != null ? ` · ${g.util_pct}% busy` : ""}`);
     sel.classList.remove("hidden");
     if (s.gpus.length === 1) $("gpu-desc").textContent = `${s.gpus[0].name} · CuPy/CUDA · fastest (I/O-bound)`;
   }

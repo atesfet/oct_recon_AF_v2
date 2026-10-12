@@ -26,14 +26,9 @@ _MPS_STATUS: tuple[bool, str] | None = None
 
 
 def gpu_available() -> bool:
-    """NVIDIA GPU usable through CuPy."""
-    try:
-        import cupy as cp
-        cp.cuda.runtime.getDeviceCount()
-        cp.zeros(1).sum()  # forces context creation; fails on a broken driver
-        return True
-    except Exception:
-        return False
+    """NVIDIA GPU usable through CuPy. Does not create a CUDA context (that would reserve memory on
+    GPU 0 even if another GPU is selected); a broken driver already fails the device count."""
+    return bool(list_gpus())
 
 
 def mps_status() -> tuple[bool, str]:
@@ -71,7 +66,7 @@ def _smi_stats() -> dict:
     if not shutil.which("nvidia-smi"):
         return {}
     try:
-        out = subprocess.run(["nvidia-smi", "--query-gpu=pci.bus_id,memory.free,memory.used,utilization.gpu",
+        out = subprocess.run(["nvidia-smi", "--query-gpu=pci.bus_id,memory.free,memory.used,utilization.gpu,index",
                               "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=10).stdout
     except Exception:
         return {}
@@ -87,9 +82,10 @@ def _smi_stats() -> dict:
             except ValueError:
                 return None
         free, used, util = num(parts[1]), num(parts[2]), num(parts[3])
+        smi_idx = num(parts[4]) if len(parts) > 4 else None
         stats[_norm_bus(parts[0])] = {"free_GB": round(free / 1024, 1) if free is not None else None,
                                       "used_GB": round(used / 1024, 1) if used is not None else None,
-                                      "util_pct": util}
+                                      "util_pct": util, "smi_index": int(smi_idx) if smi_idx is not None else None}
     return stats
 
 
@@ -121,6 +117,7 @@ def list_gpus() -> list[dict]:
         st = smi.get(pci, {})
         gpus.append({"id": i, "name": name, "total_GB": round(p["totalGlobalMem"] / 2**30, 1),
                      "free_GB": st.get("free_GB"), "used_GB": st.get("used_GB"), "util_pct": st.get("util_pct"),
+                     "smi_index": st.get("smi_index"),
                      "compute": f"{p['major']}.{p['minor']}", "pci": pci})
     return gpus
 
@@ -144,24 +141,40 @@ def parse_device(device: str, gpu_id=None):
 _CURRENT_GPU = {}
 
 
+def resolve_gpu_index(gpu_id, n: int, gpus: list[dict], current=None) -> int:
+    """Which CUDA device to use. An explicit index wins; None/'auto' keeps the GPU already selected in
+    this thread (so a helper that asks for plain 'gpu' in the middle of a run cannot move the run to
+    another GPU), else the GPU with the most free memory."""
+    if gpu_id in (None, "", "auto"):
+        if current is not None and 0 <= current < n:
+            return current
+        return choose_gpu(gpus) if (n > 1 and gpus) else 0
+    idx = int(gpu_id)
+    if not 0 <= idx < n:
+        avail = ", ".join(f"{g['id']}: {g['name']}" for g in gpus) or "none"
+        raise ValueError(f"GPU {idx} does not exist; available GPUs: {avail}")
+    return idx
+
+
 def select_gpu(gpu_id=None) -> int:
     """Make GPU `gpu_id` (int, or None/'auto') CuPy's current device for the calling thread and check
     that it works. Returns the CUDA index. Raises ValueError for an unknown index."""
     import threading
     import cupy as cp
     n = cp.cuda.runtime.getDeviceCount()
-    if gpu_id in (None, "", "auto"):
-        idx = choose_gpu(list_gpus()) if n > 1 else 0
-    else:
-        idx = int(gpu_id)
-        if not 0 <= idx < n:
-            avail = ", ".join(f"{g['id']}: {g['name']}" for g in list_gpus()) or "none"
-            raise ValueError(f"GPU {idx} does not exist; available GPUs: {avail}")
-    dev = cp.cuda.Device(idx)
-    dev.use()
-    cp.zeros(1).sum()                     # context on that device; fails on a broken driver
-    _CURRENT_GPU[threading.get_ident()] = idx
+    tid = threading.get_ident()
+    idx = resolve_gpu_index(gpu_id, n, list_gpus() if n > 1 else [], _CURRENT_GPU.get(tid))
+    use_gpu(idx)
+    cp.zeros(1).sum()                     # context on that device only; fails on a broken driver
     return idx
+
+
+def use_gpu(idx: int):
+    """(Re-)make CUDA device `idx` current for the calling thread (CuPy's current device is per thread)."""
+    import threading
+    import cupy as cp
+    cp.cuda.Device(int(idx)).use()
+    _CURRENT_GPU[threading.get_ident()] = int(idx)
 
 
 def current_gpu() -> dict | None:

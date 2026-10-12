@@ -64,7 +64,8 @@ def main(argv=None):
         for x in g:
             free = f"{x['free_GB']} GB free, " if x.get("free_GB") is not None else ""
             util = f", {x['util_pct']:.0f}% busy" if x.get("util_pct") is not None else ""
-            print(f"GPU {x['id']}: {x['name']}  ({free}{x['total_GB']} GB total{util}; compute {x['compute']}; PCI {x['pci']})")
+            smi = f"; nvidia-smi index {x['smi_index']}" if x.get('smi_index') is not None else ""
+            print(f"GPU {x['id']}: {x['name']}  ({free}{x['total_GB']} GB total{util}; compute {x['compute']}; PCI {x['pci']}{smi})")
         print(f"auto would use GPU {choose_gpu(g)} (most free memory)"); return
     if a.cmd == "inspect":
         from .params import inspect_volume
