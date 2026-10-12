@@ -349,6 +349,33 @@ class Reconstructor:
             return f"gpu:{self.gpu_info['id']}"
         return self.device
 
+    def _gpus_in_use(self):
+        if self.device != "gpu":
+            return None
+        from .backend import gpus_used_by_this_process
+        return gpus_used_by_this_process()
+
+    def _check_gpus(self, before):
+        """Which GPUs this process holds a CUDA context on after the run (nvidia-smi). Warns if the
+        run touched a GPU other than the selected one (contexts from earlier jobs in the same process,
+        e.g. the web app, are reported but not counted)."""
+        if self.device != "gpu" or not self.gpu_info:
+            return None
+        after = self._gpus_in_use()
+        if after is None:
+            self.log("GPU check: not possible (nvidia-smi does not report this process)")
+            return {"checked": False}
+        sel = self.gpu_info.get("id")
+        new_other = sorted(set(after) - set(before or []) - {sel})
+        earlier = sorted(set(before or []) - {sel})
+        if new_other:
+            self.log(f"WARNING GPU check: this run also created a context on GPU(s) {new_other} (selected: {sel})")
+        else:
+            self.log(f"GPU check: the run used only GPU {sel}" + (f" (this process still holds idle contexts on "
+                     f"GPU(s) {earlier} from earlier jobs; restart the app to release them)" if earlier else ""))
+        return {"checked": True, "selected": sel, "process_gpus_after": after,
+                "new_contexts_on_other_gpus": new_other, "earlier_contexts": earlier}
+
     def _pin_gpu(self):
         """CuPy's current device is per thread: re-apply this run's GPU (e.g. when run() is called
         from another thread than the constructor, or a helper changed it)."""
@@ -517,6 +544,7 @@ class Reconstructor:
     def run(self):
         self._pin_gpu()
         cfg, log = self.cfg, self.log
+        gpus_before = self._gpus_in_use()
         out_dir = Path(cfg.output_root) / cfg.output_name
         out_dir.mkdir(parents=True, exist_ok=True)
         name = cfg.output_name
@@ -586,7 +614,9 @@ class Reconstructor:
                 vol.flush()
             ff_info["seconds"] = time.perf_counter() - t0
         clim = (float(np.nanmin(plane_clims[:, 0])), float(np.nanmax(plane_clims[:, 1])))
-        summary = {"device": self.device, "gpu": self.gpu_info, "rows": rows, "output_dir": str(out_dir),
+        gpu_check = self._check_gpus(gpus_before)
+        summary = {"device": self.device, "gpu": self.gpu_info, "gpu_check": gpu_check, "rows": rows,
+                   "output_dir": str(out_dir),
                    "fep_removal": (dict(self.fep.summary(), basis=getattr(self, "fep_basis_info", None))
                                    if self.fep is not None else None),
                    "voxel_size_um": acq["output"]["voxel_size_um"], "acquisition": acq,

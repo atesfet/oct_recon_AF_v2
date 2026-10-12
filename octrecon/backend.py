@@ -177,6 +177,29 @@ def use_gpu(idx: int):
     _CURRENT_GPU[threading.get_ident()] = int(idx)
 
 
+def gpus_used_by_this_process() -> list[int] | None:
+    """CUDA indices of the GPUs on which this process holds a CUDA context, from nvidia-smi
+    (None if it cannot be determined, e.g. no nvidia-smi or a container that hides PIDs)."""
+    import shutil
+    import subprocess
+    if not shutil.which("nvidia-smi"):
+        return None
+    try:
+        out = subprocess.run(["nvidia-smi", "--query-compute-apps=pid,gpu_bus_id", "--format=csv,noheader"],
+                             capture_output=True, text=True, timeout=10).stdout
+    except Exception:
+        return None
+    by_pci = {g["pci"]: g["id"] for g in list_gpus()}
+    used = set()
+    for line in out.strip().splitlines():
+        parts = [x.strip() for x in line.split(",")]
+        if len(parts) >= 2 and parts[0] == str(os.getpid()):
+            idx = by_pci.get(_norm_bus(parts[1]))
+            if idx is not None:
+                used.add(idx)
+    return sorted(used)
+
+
 def current_gpu() -> dict | None:
     """Info of the GPU selected in this thread (None if no CUDA GPU is in use)."""
     import threading

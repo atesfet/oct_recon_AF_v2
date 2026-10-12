@@ -217,8 +217,10 @@ class Job:
         finally:
             self.finished = time.time()
             try:
-                import cupy as cp
-                cp.get_default_memory_pool().free_all_blocks()
+                from ..backend import current_gpu
+                if current_gpu() is not None:          # only if this job selected a GPU (no context elsewhere)
+                    import cupy as cp
+                    cp.get_default_memory_pool().free_all_blocks()
             except Exception:
                 pass
 

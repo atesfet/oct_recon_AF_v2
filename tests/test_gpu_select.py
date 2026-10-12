@@ -67,6 +67,9 @@ def test_reconstruction_records_the_gpu(tmp_path):
     assert s["device"] == "gpu" and s["gpu"]["id"] == 0
     summ = json.loads((Path(s["output_dir"]) / "g_run_summary.json").read_text())
     assert summ["gpu"]["name"] == list_gpus()[0]["name"]
+    chk = summ["gpu_check"]
+    if chk.get("checked"):                                   # nvidia-smi reports this process
+        assert chk["new_contexts_on_other_gpus"] == [] and 0 in chk["process_gpus_after"]
     with pytest.raises(ValueError):
         Reconstructor(ReconConfig(volume_folder=str(vol), device="gpu", gpu_id=99), log=lambda m: None)
 
